@@ -2,3 +2,8 @@
 .env
 .env.*
 !.env.example
+
+# OCR run artifacts
+*_ocr.json
+ocr_cache.json
+**/files/*_render_*.png

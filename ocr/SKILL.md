@@ -1,0 +1,144 @@
+---
+name: ocr
+description: >
+  Extract text from scanned PDFs and images (PNG/JPG/TIFF/HEIC) using OCR. Use
+  this skill whenever a PDF's text cannot be selected or copied, the document is a
+  scan or photo, text is rendered as images rather than a selectable layer, or the
+  file is a receipt, screenshot, fax, ID card, form, or presentation slide image.
+  Also use for non-English and Cyrillic-language scans, when pdftotext or pypdf
+  return empty or garbled output, or when a user says "this PDF has no text" or
+  "I can't copy from this file". Handles language auto-detection, deskew and
+  denoise for messy scans, tables and charts via vision escalation, and produces
+  Markdown plus plain-text output. Always reach for this skill before giving up on
+  a document that appears to have no readable text.
+---
+
+# OCR Skill
+
+Extracts text from scanned PDFs and images using a layered engine stack.
+The baseline path runs with zero additional installs (poppler + tesseract are
+assumed present). Heavier tools are added only when a page needs them.
+
+## When to use this skill
+
+- PDF where text cannot be selected/copied in a viewer
+- PDF produced by scanning a paper document or photographing a page
+- Office-generated PDF where text is rasterized into image masks (common with
+  some Word/PowerPoint exports — `pdftotext` returns near-empty output)
+- Any standalone image file containing text (PNG, JPG, TIFF, HEIC, WEBP)
+- Non-English documents, especially Cyrillic/Russian
+- Receipts, invoices, forms, ID cards, screenshots of documents
+- When a previous attempt with `pdftotext`, `pypdf`, or `pdfplumber` failed
+
+## Decision tree
+
+Work through this in order. Stop at the first successful step.
+
+```
+1. Is input an image (png/jpg/tiff/heic/webp)?
+   └─ Yes → OCR directly (skip probe). Go to step 3.
+
+2. PDF input: run scripts/probe.sh FILE
+   ├─ needs_ocr = false  → real text layer exists.
+   │   Run: pdftotext -layout FILE -  (or PyMuPDF get_text())
+   │   Done — fast, free, no OCR needed.
+   └─ needs_ocr = true   → continue to step 3.
+
+3. Baseline OCR:
+   python3 scripts/ocr.py FILE --format all
+   (auto-detects language via OSD, DPI from page size, preprocessing level)
+   Emits: FILE.md  FILE.txt  FILE_ocr.json
+   quality report on stderr: per-page confidence, flagged pages.
+
+4. Review quality report. Escalate flagged pages only:
+   ├─ low confidence OR tables/charts/forms
+   │   → python3 scripts/ocr.py FILE --engine vision --pages <flagged>
+   │     Renders persistent PNGs and hands them to the current multimodal agent
+   │     to read (Claude, GPT, or another model with image/file reading).
+   │     Agent produces Markdown (use Markdown table syntax for tables).
+   ├─ handwriting detected (very low conf, cursive)
+   │   → python3 scripts/ocr.py FILE --engine easyocr
+   └─ skewed/noisy scan (scanned paper, phone photo)
+       → python3 scripts/ocr.py FILE --preprocess full
+
+5. Need a selectable/searchable PDF?
+   → python3 scripts/ocr.py FILE --searchable-pdf OUT.pdf
+     (requires: brew install ocrmypdf)
+
+6. Processing a folder or re-running repeatedly?
+   → python3 scripts/ocr.py FILE1 FILE2 … --cache ocr_cache.json
+     Add --skip-ocr to triage-only mode (skip OCR, text-layer files only).
+     Add --force to ignore cache and re-process.
+```
+
+## Quick start (90% of cases)
+
+```bash
+# Probe first to confirm OCR is needed
+bash scripts/probe.sh myfile.pdf
+
+# Extract everything (md + txt + json quality report)
+python3 scripts/ocr.py myfile.pdf --format all
+
+# Image input
+python3 scripts/ocr.py scan.png --format all
+
+# Russian/Cyrillic doc — language auto-detected, but can be forced
+python3 scripts/ocr.py russian_doc.pdf --lang rus+eng --format md
+
+# Messy scan (skewed, noisy)
+python3 scripts/ocr.py scan.pdf --preprocess full --format all
+
+# Table-heavy slide / complex layout → vision tier
+python3 scripts/ocr.py slides.pdf --engine vision
+```
+
+## Engine tiers (summary)
+
+| Tier | Engine | Best for | Cost |
+|------|--------|----------|------|
+| 0 | pdftotext / PyMuPDF | Real text layers | Free, instant |
+| 1 | tesseract (default) | Clean scans, typed text, 160+ languages | Free, ~3–4s/page |
+| 2 | easyocr | Handwriting, degraded scans | Free, heavy (~2 GB) |
+| 3 | vision (agent reads PNGs) | Tables, charts, complex layouts | Agent/model tokens |
+| 4 | cloud APIs | High-volume, max accuracy | Paid + key |
+
+See `references/engines.md` for full details, escalation thresholds, language
+maps, DPI guidance, preprocessing levels, and install commands.
+
+## Output formats
+
+| Flag | Output |
+|------|--------|
+| `--format md` | `# filename` + `## Page N` headers, prose text |
+| `--format txt` | pages separated by `----- Page N -----` |
+| `--format json` | per-page text + word confidence + bboxes + quality report |
+| `--format all` | all three formats written to disk |
+| `--searchable-pdf OUT` | invisible text layer overlaid on original PDF |
+
+## All CLI flags
+
+```
+python3 scripts/ocr.py INPUT [INPUT ...]
+  --engine   auto|tesseract|easyocr|vision   default: auto
+  --lang     auto|<tesseract codes>           default: auto (OSD detection)
+  --format   md|txt|json|all                 default: md
+  --out      PATH                            default: stdout (md/txt) or ./
+  --dpi      N|auto                          default: auto (300 A4, 150 wide)
+  --preprocess  none|basic|enhanced|full|auto  default: auto
+  --pages    RANGE  (e.g. 1-3,5)
+  --max-pages N
+  --psm      N      (default 3; use 6 for dense single-block pages)
+  --min-conf F      (default 60.0 — flag pages below this for review)
+  --cache    PATH   --force   --skip-ocr
+  --no-cleanup      (skip whitespace / ligature cleanup)
+  --searchable-pdf OUT.pdf
+  --json-report PATH
+  --verbose
+```
+
+## Troubleshooting
+
+See `references/troubleshooting.md` for: rasterized-text PDFs, garbled Cyrillic,
+rotated pages, table/chart handling, handwriting, multi-column layouts, and
+large-folder batch jobs.

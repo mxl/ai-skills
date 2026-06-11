@@ -69,6 +69,10 @@ Work with PDF files — extract text, metadata, and structure. Hands off to the 
 
 **Requires:** `poppler`
 
+### [meeting-transcript](meeting-transcript/)
+
+Save meeting transcripts and verified summaries into an Obsidian vault, attached to the relevant project, opportunity, area, or person. Preserves transcript text verbatim, generates or improves `summary.md`, extracts action items, and offers Todoist follow-up after saving.
+
 ### [youtube-summary](youtube-summary/)
 
 Extract YouTube subtitles with `yt-dlp`, clean VTT captions into `transcript.txt`, and produce an LLM-written video summary saved as `summary.md`.

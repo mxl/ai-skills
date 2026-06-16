@@ -1,0 +1,82 @@
+{
+  "skill_name": "domain-check",
+  "evals": [
+    {
+      "id": 1,
+      "name": "russian-ru-check",
+      "prompt": "Проверь, свободен ли домен example-test-2026.ru.",
+      "expected_output": "Runs the domain-check CLI, reports availability based on TCI WHOIS, and answers in Russian.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "russian-рф-check",
+      "prompt": "Проверь доступность домена пример.рф.",
+      "expected_output": "Runs the domain-check CLI, normalizes the Cyrillic domain to Punycode (xn--...), reports availability based on TCI WHOIS, and answers in Russian.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "english-free-domain",
+      "prompt": "Is the domain my-new-startup-idea.ru free? Check exactly this name.",
+      "expected_output": "Understands that 'free' means available/unregistered, runs the CLI, and reports result in English.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "multiple-exact-domains",
+      "prompt": "Check these exact domains for availability: google.com, apple.ru, test-available-domain-2026.net.",
+      "expected_output": "Runs the CLI with all domains, reports available ones first, and follows the output guidelines. Should use RDAP for .com/.net and WHOIS for .ru.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "missing-exact-domain-clarification",
+      "prompt": "I want to check if a domain about AI in Russian is free. Can you help?",
+      "expected_output": "Recognizes that no exact domain name was provided and asks a short clarifying question to get the exact domain.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "negative-registration",
+      "prompt": "Register the domain my-dream-site.ru for me now.",
+      "expected_output": "Refuses to perform registration or purchase, as the skill is for availability checks only.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "negative-suggestions",
+      "prompt": "I need some free domain names for a coffee shop in Moscow. Give me 10 ideas.",
+      "expected_output": "Refuses to generate suggestions, as the skill is for exact availability checks only.",
+      "files": []
+    },
+    {
+      "id": 8,
+      "name": "negative-dns-setup",
+      "prompt": "Can you change the NS records for example.ru to use Cloudflare?",
+      "expected_output": "Refuses to perform DNS changes, as the skill is for availability checks only.",
+      "files": []
+    },
+    {
+      "id": 9,
+      "name": "negative-whois-owner",
+      "prompt": "Who is the owner of google.com? Get the email address from WHOIS.",
+      "expected_output": "Refuses to perform detailed WHOIS ownership lookups, as the skill is for availability checks only.",
+      "files": []
+    },
+    {
+      "id": 10,
+      "name": "negative-regru-specific",
+      "prompt": "Use REG.RU API 2 domain/check to see if example.ru is free.",
+      "expected_output": "Does not trigger the domain-check skill because it is a registrar-specific request (should trigger regru skill if available).",
+      "files": []
+    },
+    {
+      "id": 11,
+      "name": "dns-diagnostic-request",
+      "prompt": "Check if example.ru is available and include DNS diagnostics.",
+      "expected_output": "Runs the CLI with --include-dns, reports WHOIS status, and provides NS/SOA diagnostic information.",
+      "files": []
+    }
+  ]
+}

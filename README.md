@@ -2,17 +2,22 @@
 
 Reusable [Agent Skills](https://agentskills.io) for OpenCode and compatible coding assistants. This repository packages task-specific instructions, references, evals, fixtures, and deterministic helper scripts for workflows that benefit from repeatable handling instead of ad-hoc prompting.
 
-The current collection focuses on document automation, OCR, PDFs, YouTube transcript summaries, and meeting transcript storage.
+The current collection focuses on document automation, OCR, PDFs, YouTube transcript summaries, meeting transcript storage, and domain availability checks.
+
+The `docx` and `pptx` skills share a common OOXML engine in [`common/ooxml/`](common/ooxml/) that provides ZIP-safety checks, XML utilities, and a generic unpack/pack/validate engine parameterized by format-specific profiles.
 
 ## Skills
 
 | Skill | Use it for | Notable helpers |
 | --- | --- | --- |
 | [`docx`](docx/) | Create, read, edit, inspect, sanitize, validate, convert, and extract Microsoft Word `.docx` and legacy `.doc` files. | Safe OOXML unpack/pack, validation, extraction, conversion, template filling, metadata sanitization |
+| [`pptx`](pptx/) | Create, read, edit, inspect, sanitize, validate, convert, and extract Microsoft PowerPoint `.pptx` and legacy `.ppt` files. | PptxGenJS generation, safe OOXML unpack/pack, validation, extraction, slide thumbnails, template filling |
 | [`ocr`](ocr/) | Extract text from scanned PDFs, screenshots, photos, forms, receipts, and image-only documents. | OCR probing, page preprocessing, quality reports, optional searchable PDF generation |
 | [`pdf`](pdf/) | Read, extract, create, merge, split, render, inspect, and verify PDF files. | Tool-routing guidance and visual verification workflow |
 | [`youtube-summary`](youtube-summary/) | Download YouTube subtitle tracks, clean VTT captions, and summarize transcripts. | `yt-dlp` subtitle downloader and VTT cleaner |
 | [`meeting-transcript`](meeting-transcript/) | Save meeting transcripts and verified summaries into an Obsidian-style vault. | Storage rules, summary verification, action-item extraction guidance |
+| [`regru`](regru/) | Check exact domain names for availability through REG.RU API 2. | Self-contained REG.RU `domain/check` CLI with optional client SSL auth |
+| [`domain-check`](domain-check/) | Check exact domain availability for .ru, .рф, and other TLDs using public registry signals (RDAP/WHOIS). | No-API availability CLI with IDN support |
 
 ## Installation
 
@@ -38,13 +43,22 @@ Claude Code loads skills from `.claude/skills` or `~/.claude/skills`. Symlink th
 ```sh
 mkdir -p ~/.claude/skills
 ln -s /path/to/ai-skills/docx ~/.claude/skills/docx
+ln -s /path/to/ai-skills/pptx ~/.claude/skills/pptx
 ln -s /path/to/ai-skills/ocr ~/.claude/skills/ocr
 ln -s /path/to/ai-skills/pdf ~/.claude/skills/pdf
 ln -s /path/to/ai-skills/youtube-summary ~/.claude/skills/youtube-summary
 ln -s /path/to/ai-skills/meeting-transcript ~/.claude/skills/meeting-transcript
+ln -s /path/to/ai-skills/regru ~/.claude/skills/regru
+ln -s /path/to/ai-skills/domain-check ~/.claude/skills/domain-check
 ```
 
 For project-local installation, create the same symlinks under that project's `.claude/skills/` directory.
+
+> **Note for `docx` and `pptx`:** these skills use a shared OOXML engine in
+> `common/ooxml/`. The engine is located automatically by walking up to the
+> repo root. If you install skills via per-skill symlinks in an isolated
+> directory, set `AI_SKILLS_ROOT=/path/to/ai-skills` in your environment so
+> the bootstrap shim can find `common/ooxml/`.
 
 ## Requirements
 
@@ -52,16 +66,20 @@ Install only the dependencies required by the skills you use.
 
 | Dependency | Used by | Example macOS install |
 | --- | --- | --- |
-| Python 3.9+ | `docx`, `ocr`, `pdf` | `brew install python` |
-| Node.js | `youtube-summary` | `brew install node` |
-| `defusedxml` | DOCX validation and XML parsing | `python3 -m pip install defusedxml` |
-| `python-docx` | DOCX extraction and simple document generation | `python3 -m pip install python-docx` |
-| `docxtpl` | DOCX template filling | `python3 -m pip install docxtpl` |
-| `pandoc` | Higher-fidelity DOCX/Markdown conversion | `brew install pandoc` |
-| LibreOffice | `.doc` conversion and DOCX/PDF rendering | `brew install --cask libreoffice` |
-| `poppler` | PDF rendering, text extraction, and OCR preprocessing | `brew install poppler` |
-| `tesseract` | OCR | `brew install tesseract` |
-| `yt-dlp` | YouTube subtitle download | `python3 -m pip install yt-dlp` |
+| Python 3.9+ | `docx`, `pptx`, `ocr`, `pdf` | `brew install python` |
+| Node.js | `pptx` (PptxGenJS), `youtube-summary`, `regru` | `brew install node` |
+| `defusedxml` | `docx`, `pptx` — XML parsing | `python3 -m pip install defusedxml` |
+| `python-docx` | `docx` — extraction and simple document generation | `python3 -m pip install python-docx` |
+| `python-pptx` | `pptx` — extraction and simple deck generation | `python3 -m pip install python-pptx` |
+| `pptxgenjs` | `pptx` — rich deck creation (primary) | `npm install -g pptxgenjs` |
+| `docxtpl` | `docx` — template filling | `python3 -m pip install docxtpl` |
+| `pandoc` | `docx`, `pptx` — higher-fidelity conversion | `brew install pandoc` |
+| LibreOffice | `docx`, `pptx` — `.doc`/`.ppt` conversion and PDF rendering | `brew install --cask libreoffice` |
+| `poppler` | `pptx` — slide thumbnails; `pdf`, `ocr` — rendering | `brew install poppler` |
+| `tesseract` | `ocr` | `brew install tesseract` |
+| `yt-dlp` | `youtube-summary` | `python3 -m pip install yt-dlp` |
+| REG.RU partner API credentials | `regru` | Set `REGRU_USERNAME` and `REGRU_PASSWORD`; optionally `REGRU_SSL_CERT_PATH` and `REGRU_SSL_KEY_PATH`. REG.RU `domain/check` requires partner/reseller access. |
+| WhoisXML API key | `domain-check` | Set `WHOISXML_API_KEY` environment variable (only for legacy WhoisXML fallback). |
 
 Some workflows have optional fallback tools. See each skill's `SKILL.md` for task-specific requirements.
 
@@ -71,8 +89,11 @@ Some workflows have optional fallback tools. See each skill's `SKILL.md` for tas
 ai-skills/
 ├── README.md
 ├── LICENSE
+├── common/
+│   └── ooxml/              # shared OOXML engine (docx + pptx)
 ├── .docs/
-│   └── docx-research.md
+│   ├── docx-research.md
+│   └── pptx-research.md
 ├── .github/workflows/
 │   └── docx-validation.yml
 ├── docx/
@@ -81,6 +102,11 @@ ai-skills/
 │   ├── references/
 │   ├── evals/
 │   └── tests/
+├── pptx/
+│   ├── SKILL.md
+│   ├── scripts/
+│   ├── references/
+│   └── evals/
 ├── ocr/
 │   ├── SKILL.md
 │   ├── scripts/
@@ -94,6 +120,15 @@ ai-skills/
 ├── meeting-transcript/
 │   ├── SKILL.md
 │   └── templates/
+│   └── evals/
+├── regru/
+│   ├── SKILL.md
+│   ├── scripts/
+│   └── evals/
+├── domain-check/
+│   ├── SKILL.md
+│   ├── scripts/
+│   └── evals/
 ├── generated/              # ignored output directory for skill development artifacts
 └── tests/                  # shared test utilities
 ```
@@ -130,6 +165,13 @@ Run DOCX fixture evals:
 python3 docx/evals/run-evals.py
 ```
 
+Generate PPTX fixtures and run evals:
+
+```sh
+python3 pptx/evals/make-fixtures.py
+python3 pptx/evals/run-evals.py
+```
+
 Probe and OCR a scanned document:
 
 ```sh
@@ -141,6 +183,19 @@ Try the YouTube transcript helper:
 
 ```sh
 node youtube-summary/scripts/youtube-summary.mjs "https://www.youtube.com/watch?v=..."
+```
+
+Check exact domain availability through REG.RU API 2:
+
+```sh
+REGRU_USERNAME=your-login REGRU_PASSWORD=your-api-password \
+  node regru/scripts/regru-domain-check.mjs example.ru example.com
+```
+
+Check exact domain availability using public registry signals:
+
+```sh
+node domain-check/scripts/domain-check.mjs example.ru пример.рф
 ```
 
 Validate a skill directory when OpenCode skill tooling is available:

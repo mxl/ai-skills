@@ -1,0 +1,47 @@
+{
+  "skill_name": "regru",
+  "evals": [
+    {
+      "id": 1,
+      "name": "english-exact-domains",
+      "prompt": "Check whether these exact domains are available through REG.RU: example.ru, probably-free-2026-test-domain.ru, example.com. Use my configured environment credentials.",
+      "expected_output": "Runs the bundled regru domain check script with the exact domains, reports available domains first, then unavailable/errors, and does not suggest buying or registering.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "russian-language-output",
+      "prompt": "Проверь через Рег.ру, свободны ли домены primer-test-2026.ru и ya.ru. Ответь по-русски.",
+      "expected_output": "Uses the regru script with exact domains and returns a Russian-language summary matching the prompt language.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "mixed-valid-invalid-domains",
+      "prompt": "Use REG.RU API 2 to check this mixed list exactly as domains, not suggestions: ya.ru, a.ru, qqqq-example-check-2026.com, qqйй.com.",
+      "expected_output": "Reports each exact domain status, treating only result Available as available and surfacing invalid-domain error codes/messages for invalid names.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "missing-credentials",
+      "prompt": "Can you check if mydomain-example.ru is free on reg.ru? I haven't set any REG.RU credentials in this shell yet.",
+      "expected_output": "Explains that REGRU_USERNAME and REGRU_PASSWORD are required environment variables and does not ask the user to paste secrets into chat.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "ssl-auth-config",
+      "prompt": "Check example.ru through REG.RU using my env auth. I have REGRU_SSL_CERT_PATH and REGRU_SSL_KEY_PATH set for API client certificate auth.",
+      "expected_output": "Uses the bundled script, which automatically sends client SSL cert/key when both SSL env vars are set, while still requiring username/password.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "non-reseller-account",
+      "prompt": "I added my IP to the REG.RU API whitelist, but checking domains returns RESELLER_AUTH_FAILED. What does that mean?",
+      "expected_output": "Explains that domain/check is partner/reseller-only in REG.RU API 2 and that a non-reseller account can authenticate but cannot use this exact availability endpoint.",
+      "files": []
+    }
+  ]
+}

@@ -1,34 +1,34 @@
 [
   {
-    "query": "Which Hugging Face models under 45 GB have I not downloaded yet? Check both my main HF cache and /Volumes/Storage/hf, skip 5-bit and 6-bit variants when the family already has 4-bit and 8-bit or bf16, and give me a size-sorted table.",
+    "query": "I track models in a Markdown note with columns: HF ID, quant, size, status (☁️=not downloaded, ✅=local). Parse the rows, check each ☁️ model against my HF caches at ~/.cache/huggingface and /Volumes/Storage/hf, filter those under 45 GB, skip 5-bit/6-bit when the same family already has a 4-bit and an 8-bit variant, sort by size, and give me a size-sorted table plus a ready-to-paste shell loop that downloads them into HF_HOME=/Volumes/Storage/hf.",
     "should_trigger": true
   },
   {
-    "query": "Use hf download --dry-run to estimate the total size of mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit without polluting my real cache, then tell me whether it fits in a 45 GB budget.",
+    "query": "I want to set up a JSON config that permanently tracks my two Hugging Face cache directories — main at ~/.cache/huggingface and an external drive at /Volumes/Storage/hf — so I can reference them by name in workflows. Temporary dry-run caches should not go in this file. Show me the minimal schema, validate it, and explain what each field does.",
     "should_trigger": true
   },
   {
-    "query": "Compare the benchmark values for gpt-oss-20b on its own Hugging Face page against the GPT-OSS-20B column on the Nemotron comparison table, and keep the exact metric names without normalizing them.",
+    "query": "I need to audit my full HF model inventory across two caches: ~/.cache/huggingface and /Volumes/Storage/hf. For each cached repo, tell me whether it is fully downloaded and verified, metadata-only, or has missing shards/tokenizer files. Flag any that would fail hf cache verify --fail-on-missing-files. Summarize the overall disk usage per cache and list repos that appear in one cache but not the other.",
     "should_trigger": true
   },
   {
-    "query": "Generate a copy-paste shell loop that downloads these Hugging Face repos into HF_HOME=/Volumes/Storage/hf and quote each model ID safely.",
+    "query": "I have a Markdown table of HF model IDs like mlx-community/Qwen3.6-35B-A3B-4bit in backtick code spans. I want every ID turned into a clickable Markdown link to https://huggingface.co/<repo-id> while keeping the table renderable in Obsidian (no footnote-style references, inline links only). Apply this to all rows and validate the result.",
     "should_trigger": true
   },
   {
-    "query": "Turn every HF model ID in this Markdown table into a link to the corresponding Hugging Face model page and keep Obsidian table rendering intact.",
+    "query": "The Nemotron-3-Nano-30B model card has a comparison table showing GPT-OSS-20B column values for MMLU-Pro, AIME25, GPQA, SWE-Bench, TauBench, and RULER. The openai/gpt-oss-20b page itself shows MMLU-Pro, GPQA Diamond, SWE-bench Verified, HLE, and LEXam scores. Build a unified comparison table with both sources, mark which values came from the Nemotron page vs the GPT-OSS page, keep exact benchmark names without normalization, and note any score discrepancies between the two sources.",
     "should_trigger": true
   },
   {
-    "query": "Check whether mlx-community/Olmo-3.1-32B-Think-8bit is fully available in any of my Hugging Face caches or whether it is metadata-only or missing shards.",
+    "query": "I want to get the exact on-disk size of mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit without touching my real HF caches. Use hf download --dry-run with a throwaway temp directory, parse the reported total, and tell me: (a) the full repo size, (b) whether it fits in a 45 GB remaining-space budget, and (c) the recommended shell command to actually download it to /Volumes/Storage/hf afterwards.",
     "should_trigger": true
   },
   {
-    "query": "I want a tiny JSON config that tracks my persistent Hugging Face homes: main at ~/.cache/huggingface and storage at /Volumes/Storage/hf. Do not include temporary dry-run homes in the config.",
+    "query": "I need a shell loop that downloads a list of mlx-community and lmstudio-community repos into HF_HOME=/Volumes/Storage/hf. Quote every repo ID correctly, set HF_HUB_ETAG_TIMEOUT=60 and HF_HUB_DOWNLOAD_TIMEOUT=600, and make the result copy-pasteable as a single block.",
     "should_trigger": true
   },
   {
-    "query": "Build a report that lists every non-downloaded Hugging Face model candidate under 45 GB, sorted by total dry-run size, with repo ID, quantization, and which cache it is missing from.",
+    "query": "My HF cache on /Volumes/Storage/hf is getting full. List the largest cached repos using hf cache ls with size filter and sort, identify detached revisions I can prune, and give me the rm/prune commands to reclaim at least 20 GB — with a dry-run preview first so I don't accidentally delete anything.",
     "should_trigger": true
   },
   {

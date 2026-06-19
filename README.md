@@ -18,6 +18,7 @@ The `docx` and `pptx` skills share a common OOXML engine in [`common/ooxml/`](co
 | [`meeting-transcript`](meeting-transcript/) | Save meeting transcripts and verified summaries into an Obsidian-style vault. | Storage rules, summary verification, action-item extraction guidance |
 | [`regru`](regru/) | Check exact domain names for availability through REG.RU API 2. | Self-contained REG.RU `domain/check` CLI with optional client SSL auth |
 | [`domain-check`](domain-check/) | Check exact domain availability for .ru, .рф, and other TLDs using public registry signals (RDAP/WHOIS). | No-API availability CLI with IDN support |
+| [`huggingface`](huggingface/) | Inspect Hugging Face model pages and local HF caches, estimate dry-run download sizes, compare benchmark provenance, and generate download plans across multiple `HF_HOME` directories. | Multi-cache workflow guidance, `hf download --dry-run` sizing, benchmark provenance rules |
 
 ## Installation
 
@@ -50,6 +51,7 @@ ln -s /path/to/ai-skills/youtube-summary ~/.claude/skills/youtube-summary
 ln -s /path/to/ai-skills/meeting-transcript ~/.claude/skills/meeting-transcript
 ln -s /path/to/ai-skills/regru ~/.claude/skills/regru
 ln -s /path/to/ai-skills/domain-check ~/.claude/skills/domain-check
+ln -s /path/to/ai-skills/huggingface ~/.claude/skills/huggingface
 ```
 
 For project-local installation, create the same symlinks under that project's `.claude/skills/` directory.
@@ -128,6 +130,10 @@ ai-skills/
 ├── domain-check/
 │   ├── SKILL.md
 │   ├── scripts/
+│   └── evals/
+├── huggingface/
+│   ├── SKILL.md
+│   ├── references/
 │   └── evals/
 ├── generated/              # ignored output directory for skill development artifacts
 └── tests/                  # shared test utilities

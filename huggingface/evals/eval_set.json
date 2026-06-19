@@ -1,0 +1,66 @@
+[
+  {
+    "query": "Which Hugging Face models under 45 GB have I not downloaded yet? Check both my main HF cache and /Volumes/Storage/hf, skip 5-bit and 6-bit variants when the family already has 4-bit and 8-bit or bf16, and give me a size-sorted table.",
+    "should_trigger": true
+  },
+  {
+    "query": "Use hf download --dry-run to estimate the total size of mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit without polluting my real cache, then tell me whether it fits in a 45 GB budget.",
+    "should_trigger": true
+  },
+  {
+    "query": "Compare the benchmark values for gpt-oss-20b on its own Hugging Face page against the GPT-OSS-20B column on the Nemotron comparison table, and keep the exact metric names without normalizing them.",
+    "should_trigger": true
+  },
+  {
+    "query": "Generate a copy-paste shell loop that downloads these Hugging Face repos into HF_HOME=/Volumes/Storage/hf and quote each model ID safely.",
+    "should_trigger": true
+  },
+  {
+    "query": "Turn every HF model ID in this Markdown table into a link to the corresponding Hugging Face model page and keep Obsidian table rendering intact.",
+    "should_trigger": true
+  },
+  {
+    "query": "Check whether mlx-community/Olmo-3.1-32B-Think-8bit is fully available in any of my Hugging Face caches or whether it is metadata-only or missing shards.",
+    "should_trigger": true
+  },
+  {
+    "query": "I want a tiny JSON config that tracks my persistent Hugging Face homes: main at ~/.cache/huggingface and storage at /Volumes/Storage/hf. Do not include temporary dry-run homes in the config.",
+    "should_trigger": true
+  },
+  {
+    "query": "Build a report that lists every non-downloaded Hugging Face model candidate under 45 GB, sorted by total dry-run size, with repo ID, quantization, and which cache it is missing from.",
+    "should_trigger": true
+  },
+  {
+    "query": "Fine-tune this Llama model with LoRA on my support dataset and give me the training script.",
+    "should_trigger": false
+  },
+  {
+    "query": "Explain what GPQA Diamond measures and whether it is a good benchmark for reasoning models.",
+    "should_trigger": false
+  },
+  {
+    "query": "Install transformers, accelerate, and bitsandbytes into my Python virtualenv.",
+    "should_trigger": false
+  },
+  {
+    "query": "Summarize this PDF and extract the tables into CSV.",
+    "should_trigger": false
+  },
+  {
+    "query": "Deploy a Text Generation Inference server for Mistral on Kubernetes.",
+    "should_trigger": false
+  },
+  {
+    "query": "I need a PowerPoint deck comparing AI coding tools for our leadership team.",
+    "should_trigger": false
+  },
+  {
+    "query": "Debug why this React table component rerenders too often when I sort columns.",
+    "should_trigger": false
+  },
+  {
+    "query": "Download this YouTube transcript and summarize it.",
+    "should_trigger": false
+  }
+]

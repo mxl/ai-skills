@@ -46,8 +46,15 @@ Do not use this skill for:
    Useful options:
    - `--json`: Print machine-readable JSON only.
    - `--method auto|rdap|whois|dns`: Force a specific check method (default is `auto`).
+   - `--concurrency <n>`: Number of parallel checks (default `5`). Lower it (e.g. `2`) if a registry rate-limits.
    - `--include-dns`: Add DNS diagnostics (NS/SOA) to the result.
-   - `--delay-ms <ms>`: Add delay between sequential requests to avoid rate limits.
+   - `--delay-ms <ms>`: Delay each worker waits after a request (politeness throttle).
+
+   Performance notes:
+   - Checks run in parallel and stream each result as it completes (`[free]/[taken]/[err]` lines), then a grouped summary with counts. Partial progress is preserved if the run is interrupted.
+   - For batches that are entirely `.ru`/`.рф`, the RDAP bootstrap download is skipped automatically (those go straight to TCI WHOIS).
+   - The RDAP bootstrap is cached in the temp dir for 24h, and transient RDAP `429`/5xx and WHOIS connection/timeout errors are retried with backoff.
+   - Prefer batches of ~10–20 domains; the default concurrency keeps them fast. If a TLD returns many `429`s, retry with `--concurrency 2`.
 
 ## Interpreting Results
 

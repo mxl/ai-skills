@@ -3,13 +3,43 @@
 import https from 'node:https';
 import net from 'node:net';
 import dns from 'node:dns/promises';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { domainToASCII } from 'node:url';
 
 const IANA_RDAP_BOOTSTRAP = 'https://data.iana.org/rdap/dns.json';
 const TCI_WHOIS_SERVER = 'whois.tcinet.ru';
 const IANA_WHOIS_SERVER = 'whois.iana.org';
+const BOOTSTRAP_CACHE_FILE = path.join(os.tmpdir(), 'domain-check-rdap-bootstrap.json');
+const BOOTSTRAP_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 
 const VALID_METHODS = new Set(['auto', 'rdap', 'whois', 'dns']);
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Retry helper with exponential backoff + jitter for transient errors.
+async function withRetry(fn, { retries = 2, baseDelayMs = 500 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (!err || !err.retryable || attempt === retries) throw err;
+      const delay = baseDelayMs * 2 ** attempt + Math.floor(Math.random() * 200);
+      await sleep(delay);
+    }
+  }
+  throw lastErr;
+}
+
+function makeRetryable(err) {
+  if (err) err.retryable = true;
+  return err;
+}
 
 function usage() {
   return `Usage: node domain-check/scripts/domain-check.mjs [options] <domain...>
@@ -18,7 +48,8 @@ Check exact domain availability using RDAP, WHOIS, and DNS diagnostics.
 
 Options:
   --method <method>    Check method: auto, rdap, whois, dns (default: auto)
-  --delay-ms <ms>      Delay between requests in milliseconds (default: 0)
+  --concurrency <n>    Parallel checks (default: 5)
+  --delay-ms <ms>      Delay after each request per worker in ms (default: 0)
   --timeout-ms <ms>    Network timeout in milliseconds (default: 8000)
   --include-dns        Include DNS diagnostics (NS/SOA) in the results
   --json               Print machine-readable JSON only
@@ -31,6 +62,7 @@ function parseArgs(argv) {
     method: 'auto',
     delayMs: 0,
     timeoutMs: 8000,
+    concurrency: 5,
     includeDns: false,
     json: false,
     domains: [],
@@ -60,6 +92,14 @@ function parseArgs(argv) {
       if (!next) throw new Error('--timeout-ms requires a value');
       options.timeoutMs = parseInt(next, 10);
       if (isNaN(options.timeoutMs)) throw new Error('--timeout-ms must be a number');
+      i += 1;
+    } else if (arg === '--concurrency') {
+      const next = argv[i + 1];
+      if (!next) throw new Error('--concurrency requires a value');
+      options.concurrency = parseInt(next, 10);
+      if (isNaN(options.concurrency) || options.concurrency < 1) {
+        throw new Error('--concurrency must be a positive number');
+      }
       i += 1;
     } else if (arg.startsWith('-')) {
       throw new Error(`Unknown option: ${arg}`);
@@ -92,9 +132,32 @@ function normalizeDomain(raw) {
   };
 }
 
-async function fetchRDAPBootstrap() {
+function readBootstrapCache() {
+  try {
+    const stat = fs.statSync(BOOTSTRAP_CACHE_FILE);
+    if (Date.now() - stat.mtimeMs > BOOTSTRAP_CACHE_TTL_MS) return null;
+    return JSON.parse(fs.readFileSync(BOOTSTRAP_CACHE_FILE, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeBootstrapCache(data) {
+  try {
+    fs.writeFileSync(BOOTSTRAP_CACHE_FILE, JSON.stringify(data), 'utf8');
+  } catch {
+    // Cache write is best-effort; ignore failures.
+  }
+}
+
+function downloadBootstrap(timeoutMs) {
   return new Promise((resolve, reject) => {
-    https.get(IANA_RDAP_BOOTSTRAP, (res) => {
+    const req = https.get(IANA_RDAP_BOOTSTRAP, { timeout: timeoutMs }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(makeRetryable(new Error(`RDAP bootstrap returned HTTP ${res.statusCode}`)));
+        return;
+      }
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
       res.on('end', () => {
@@ -104,8 +167,21 @@ async function fetchRDAPBootstrap() {
           reject(new Error(`Failed to parse RDAP bootstrap: ${e.message}`));
         }
       });
-    }).on('error', reject);
+    });
+    req.on('error', (err) => reject(makeRetryable(err)));
+    req.on('timeout', () => {
+      req.destroy();
+      reject(makeRetryable(new Error('RDAP bootstrap request timed out')));
+    });
   });
+}
+
+async function fetchRDAPBootstrap(timeoutMs) {
+  const cached = readBootstrapCache();
+  if (cached) return cached;
+  const data = await withRetry(() => downloadBootstrap(timeoutMs), { retries: 2, baseDelayMs: 400 });
+  writeBootstrapCache(data);
+  return data;
 }
 
 async function queryRDAP(domain, bootstrap, timeoutMs) {
@@ -125,12 +201,20 @@ async function queryRDAP(domain, bootstrap, timeoutMs) {
         res.on('data', (chunk) => data += chunk);
         res.on('end', () => resolve({ status: 'registered', source: 'RDAP', raw: data }));
       } else if (res.statusCode === 404) {
+        res.resume();
         resolve({ status: 'appears_unregistered', source: 'RDAP', raw: null });
       } else {
-        reject(new Error(`RDAP returned HTTP ${res.statusCode}`));
+        res.resume();
+        const err = new Error(`RDAP returned HTTP ${res.statusCode}`);
+        if (res.statusCode === 429 || res.statusCode >= 500) makeRetryable(err);
+        reject(err);
       }
     });
-    req.on('error', reject);
+    req.on('error', (err) => reject(makeRetryable(err)));
+    req.on('timeout', () => {
+      req.destroy();
+      reject(makeRetryable(new Error('RDAP request timed out')));
+    });
     req.end();
   });
 }
@@ -177,10 +261,10 @@ async function queryWhois(domain, timeoutMs) {
       }
     });
 
-    client.on('error', (err) => reject(err));
+    client.on('error', (err) => reject(makeRetryable(err)));
     client.on('timeout', () => {
       client.destroy();
-      reject(new Error('WHOIS request timed out'));
+      reject(makeRetryable(new Error('WHOIS request timed out')));
     });
   });
 }
@@ -255,21 +339,27 @@ async function main() {
     }
   }
 
+  // RDAP bootstrap is only needed when at least one non-.ru/.рф domain
+  // goes through RDAP. Skip the network call entirely otherwise.
+  const needsBootstrap =
+    (options.method === 'auto' || options.method === 'rdap') &&
+    normalized.some((d) => {
+      const tld = d.ascii.split('.').pop().toLowerCase();
+      return tld !== 'ru' && tld !== 'xn--p1ai';
+    });
+
   let bootstrap = null;
-  if (options.method === 'auto' || options.method === 'rdap') {
+  if (needsBootstrap) {
     try {
-      bootstrap = await fetchRDAPBootstrap();
+      bootstrap = await fetchRDAPBootstrap(options.timeoutMs);
     } catch (e) {
       console.error(`Warning: Could not fetch RDAP bootstrap: ${e.message}. Falling back to WHOIS.`);
     }
   }
 
-  const finalResults = [];
-  for (let i = 0; i < normalized.length; i++) {
-    const domainObj = normalized[i];
+  async function checkOne(domainObj) {
     const domain = domainObj.ascii;
     const tld = domain.split('.').pop().toLowerCase();
-    
     let result = null;
     let methodUsed = options.method;
 
@@ -278,24 +368,24 @@ async function main() {
         result = await queryDns(domain, options.timeoutMs);
       } else if (options.method === 'rdap') {
         if (!bootstrap) throw new Error('RDAP bootstrap not available');
-        result = await queryRDAP(domain, bootstrap, options.timeoutMs);
+        result = await withRetry(() => queryRDAP(domain, bootstrap, options.timeoutMs));
       } else if (options.method === 'whois') {
-        result = await queryWhois(domain, options.timeoutMs);
+        result = await withRetry(() => queryWhois(domain, options.timeoutMs));
       } else {
         // auto method
-        if ((tld === 'ru' || tld === 'xn--p1ai')) {
-          result = await queryWhois(domain, options.timeoutMs);
+        if (tld === 'ru' || tld === 'xn--p1ai') {
+          result = await withRetry(() => queryWhois(domain, options.timeoutMs));
           methodUsed = 'whois';
         } else if (bootstrap) {
           try {
-            result = await queryRDAP(domain, bootstrap, options.timeoutMs);
+            result = await withRetry(() => queryRDAP(domain, bootstrap, options.timeoutMs));
             methodUsed = 'rdap';
           } catch (e) {
-            result = await queryWhois(domain, options.timeoutMs);
+            result = await withRetry(() => queryWhois(domain, options.timeoutMs));
             methodUsed = 'whois';
           }
         } else {
-          result = await queryWhois(domain, options.timeoutMs);
+          result = await withRetry(() => queryWhois(domain, options.timeoutMs));
           methodUsed = 'whois';
         }
       }
@@ -305,7 +395,7 @@ async function main() {
 
     const dnsDiagnostics = options.includeDns ? await queryDns(domain, options.timeoutMs) : null;
 
-    finalResults.push({
+    return {
       domain: domainObj.unicode,
       asciiDomain: domainObj.ascii,
       tld,
@@ -314,53 +404,73 @@ async function main() {
       source: result.source,
       message: result.message || null,
       dns: dnsDiagnostics,
-    });
-
-    if (i < normalized.length - 1 && options.delayMs > 0) {
-      await new Promise(resolve => setTimeout(resolve, options.delayMs));
-    }
+    };
   }
 
-  const output = {
-    method: options.method,
-    checkedAt: new Date().toISOString(),
-    results: finalResults,
-  };
+  function streamLine(r) {
+    if (options.json) return;
+    let tag;
+    if (r.status === 'appears_unregistered') tag = 'free ';
+    else if (r.status === 'registered') tag = 'taken';
+    else tag = 'err  ';
+    const detail = r.status === 'appears_unregistered' || r.status === 'registered'
+      ? `(${r.source})`
+      : `: ${r.message || r.status}`;
+    console.log(`[${tag}] ${r.domain} ${detail}`);
+  }
+
+  // Concurrency pool: stream each result as it completes so partial
+  // progress survives an early termination.
+  const finalResults = new Array(normalized.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(options.concurrency, normalized.length);
+  const workers = [];
+  for (let w = 0; w < workerCount; w += 1) {
+    workers.push((async () => {
+      while (true) {
+        const i = nextIndex;
+        nextIndex += 1;
+        if (i >= normalized.length) break;
+        const res = await checkOne(normalized[i]);
+        finalResults[i] = res;
+        streamLine(res);
+        if (options.delayMs > 0) await sleep(options.delayMs);
+      }
+    })());
+  }
+  await Promise.all(workers);
 
   if (options.json) {
+    const output = {
+      method: options.method,
+      checkedAt: new Date().toISOString(),
+      results: finalResults,
+    };
     console.log(JSON.stringify(output, null, 2));
-  } else {
-    const available = finalResults.filter(r => r.status === 'appears_unregistered');
-    const registered = finalResults.filter(r => r.status === 'registered');
-    const others = finalResults.filter(r => r.status !== 'appears_unregistered' && r.status !== 'registered');
-
-    if (available.length > 0) {
-      console.log('Appears unregistered (no registry record found):');
-      for (const r of available) {
-        console.log(`  ${r.domain} (${r.source})`);
-      }
-      console.log('');
-    }
-
-    if (registered.length > 0) {
-      console.log('Registered:');
-      for (const r of registered) {
-        console.log(`  ${r.domain} (${r.source})`);
-      }
-      console.log('');
-    }
-
-    if (others.length > 0) {
-      console.log('Unknown or errored:');
-      for (const r of others) {
-        console.log(`  ${r.domain}: ${r.message || r.status}`);
-      }
-    }
-    
-    if (available.length === 0 && registered.length === 0 && others.length === 0) {
-      console.log('No results found.');
-    }
+    return;
   }
+
+  const available = finalResults.filter(r => r.status === 'appears_unregistered');
+  const registered = finalResults.filter(r => r.status === 'registered');
+  const others = finalResults.filter(r => r.status !== 'appears_unregistered' && r.status !== 'registered');
+
+  console.log('');
+  if (available.length > 0) {
+    console.log('Appears unregistered (no registry record found):');
+    for (const r of available) console.log(`  ${r.domain} (${r.source})`);
+    console.log('');
+  }
+  if (registered.length > 0) {
+    console.log('Registered:');
+    for (const r of registered) console.log(`  ${r.domain} (${r.source})`);
+    console.log('');
+  }
+  if (others.length > 0) {
+    console.log('Unknown or errored:');
+    for (const r of others) console.log(`  ${r.domain}: ${r.message || r.status}`);
+    console.log('');
+  }
+  console.log(`Summary: ${available.length} free, ${registered.length} taken, ${others.length} errored (of ${finalResults.length}).`);
 }
 
 main().catch((error) => {

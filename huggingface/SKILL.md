@@ -38,7 +38,7 @@ Do not use this skill for:
 
 ## CLI Baseline
 
-The current CLI is `hf` (from `huggingface_hub`). The old `huggingface-cli` name still works as a deprecated alias; prefer `hf`.
+The current CLI is `hf` (from `huggingface_hub`). The old `huggingface-cli` name is deprecated. Generate `huggingface-cli` commands only when the user explicitly asks for legacy syntax.
 
 Two rules keep this skill from going stale:
 
@@ -47,22 +47,19 @@ Two rules keep this skill from going stale:
 
 If the user already installed the official `hf` CLI skill, this skill stays complementary: it adds selection/sizing/cache/provenance workflows rather than duplicating raw command reference.
 
-## Cache Configuration
+## Cache Homes
 
-Assume the user may keep more than one persistent Hugging Face cache. Store only persistent homes in a small JSON config. Do not persist temporary dry-run homes.
+Assume the user may keep any number of persistent Hugging Face cache homes. Do not hardcode specific cache paths in the skill. Derive cache homes from the current context: explicit user messages, relevant notes, project config, environment variables, or previously established session context. If the user references a vault note or local model inventory, inspect that source for cache-home declarations before assuming defaults.
 
-Minimal config shape:
+Use this conceptual shape when tracking homes during a task:
 
 ```json
 {
   "homes": [
     {
-      "name": "main",
-      "path": "~/.cache/huggingface"
-    },
-    {
-      "name": "storage",
-      "path": "/Volumes/Storage/hf"
+      "name": "short human label",
+      "path": "/absolute/or/expanded/HF_HOME/path",
+      "source": "user|note|env|default|config"
     }
   ]
 }
@@ -70,7 +67,17 @@ Minimal config shape:
 
 See `references/config-schema.md` for a stricter schema and field guidance.
 
-`HF_HOME` is the root; the actual model cache lives at `$HF_HOME/hub` (overridable separately via `HF_HUB_CACHE`). For one-off commands, `--cache-dir` is often simpler than exporting `HF_HOME`.
+`HF_HOME` is the root; the actual model cache lives at `$HF_HOME/hub` unless `HF_HUB_CACHE` overrides it. For one-off commands, `--cache-dir` is often simpler than exporting `HF_HOME`.
+
+Cache-home discovery order:
+
+1. Paths explicitly supplied by the user in the current request.
+2. Paths in relevant notes, model inventories, or project docs the user points to.
+3. `HF_HOME` and `HF_HUB_CACHE` from the active shell environment.
+4. Any skill/config file the user has set up for persistent HF homes.
+5. The Hugging Face default home only if no other source is available.
+
+If local cache state is central to the task and no cache homes are discoverable, ask one short question about additional homes before making global claims. When reporting results, include the home label/path and source so the user can audit where each status came from.
 
 For a clean `hf download --dry-run` or clean cache inspection, point at a fresh temporary directory in the operating system's standard temp location (via `--cache-dir` or a temporary `HF_HOME`) instead of reusing a configured cache. This avoids cached files hiding the real download size. Do not add that temporary directory to the persistent config.
 
@@ -137,25 +144,53 @@ Notes:
 
 When checking whether a model is downloaded or complete:
 
-1. Check every relevant configured home.
+1. Discover and check every relevant cache home; do not assume there are only one or two.
 2. List cache contents:
    ```bash
    hf cache ls --format json
    hf cache ls --filter "size>1GB" --sort size:desc
    ```
-3. Verify integrity / completeness for a specific repo:
+3. Verify integrity / completeness for a specific repo when useful:
    ```bash
    hf cache verify <repo-id> --fail-on-missing-files
    ```
    Use `--local-dir <path>` to verify files stored outside the standard cache layout.
-4. Distinguish these states clearly and do not collapse them into a single yes/no:
-   - fully downloaded and verified;
-   - missing;
-   - metadata-only;
-   - incomplete or missing shards / tokenizer / index.
-5. If a model exists in one home but not another, report that per-home rather than as one global answer.
+4. For actual disk usage, use `du` on the repo directory or its `blobs/`; `hf cache ls` can report logical or deduplicated values that do not match disk usage.
+5. Distinguish these states clearly and do not collapse them into a single yes/no:
+   - usable: snapshot links resolve to present blob files;
+   - usable + stale incomplete blobs: model is usable, but interrupted-download residue remains;
+   - incomplete: snapshot links are missing or point to unusable targets;
+   - metadata-only: refs/snapshots exist but required model files are absent;
+   - missing: no repo cache entry in that home.
+6. If a model exists in one home but not another, report that per-home rather than as one global answer.
 
 Do not claim a model is fully available unless the cache contents are complete enough for actual use.
+
+### Snapshot-Based Completeness Check
+
+Do not classify a model as incomplete solely because `*.incomplete` files exist. Hugging Face can leave stale `.incomplete` blobs after interrupted downloads even when `hf download <repo-id>` later completes successfully. The model is usable if the files referenced by its active snapshot resolve to complete blob files.
+
+For a repo cache directory such as `$HF_HOME/hub/models--ORG--REPO`, check:
+
+1. `snapshots/` contains an active revision directory.
+2. Every symlink under the active snapshot resolves to an existing file under `blobs/` or another valid target.
+3. No snapshot symlink target ends in `.incomplete`.
+4. Required runtime files are present for the use case: weights, tokenizer/config, index files if the model uses sharded weights.
+
+Minimal shell pattern for one repo directory:
+
+```bash
+repo_dir="<hf-home>/hub/models--ORG--REPO"
+find "$repo_dir/snapshots" -type l -print0 | while IFS= read -r -d '' link; do
+  target="$(readlink "$link")"
+  resolved="$(cd "$(dirname "$link")" && cd "$(dirname "$target")" && pwd)/$(basename "$target")"
+  if [ ! -e "$resolved" ] || [[ "$resolved" == *.incomplete ]]; then
+    printf 'BAD\t%s\t%s\n' "$link" "$target"
+  fi
+done
+```
+
+Treat bare `.incomplete` files that are not referenced by snapshots as cleanup candidates, not proof of an unusable model.
 
 ## Cache Cleanup And Disk Reclamation
 
@@ -175,7 +210,22 @@ When the user wants to free space:
    hf cache prune
    ```
 
-There is no `hf cache delete`; use `rm` and `prune`. Always preview with `--dry-run` (or list first) before removing anything, and confirm which home you are operating on.
+There is no `hf cache delete`; use `hf cache rm` and `hf cache prune`. Always preview with `--dry-run` (or list first) before removing anything, and confirm which home you are operating on.
+
+`hf cache prune` removes detached revisions; it does not remove stale `*.incomplete` blobs. Clean incomplete residue only after snapshot-based completeness checks show the referenced model files are usable:
+
+```bash
+find "<hf-home>/hub" -name "*.incomplete" -print
+find "<hf-home>/hub" -name "*.incomplete" -delete
+```
+
+For duplicate cleanup across multiple homes, build a repo-by-home matrix first. Remove a repo directory from one home only when another home has a usable copy, or when the entry is clearly metadata-only/stale residue that the user wants removed. Make destructive commands home-specific:
+
+```bash
+rm -rf "<hf-home>/hub/models--ORG--REPO"
+```
+
+Do not use broad cache deletion commands when the user asked to remove one repo, one quantization, or one home's duplicate copy.
 
 ## Selective And Pinned Downloads
 
@@ -239,7 +289,7 @@ When generating commands:
 Example:
 
 ```bash
-HF_HOME="/Volumes/Storage/hf" && for model in \
+HF_HOME="<target-hf-home>" && for model in \
   "mlx-community/example-4bit" \
   "mlx-community/example-8bit"
 do
@@ -251,6 +301,8 @@ done
 
 - Match the user's language.
 - For model lists, prefer compact tables with: repo ID, size, quantization, and download status or source when relevant.
+- For cache audits, report status per discovered cache home. Prefer statuses like `usable`, `usable + stale incomplete`, `incomplete`, `metadata-only`, and `missing` instead of a single global downloaded/not-downloaded flag.
+- For cleanup reports, separate logical repo size, actual disk usage from `du`, and bytes that will be reclaimed.
 - For benchmark comparisons, call out source mismatches explicitly.
 - If using inline links in Markdown tables for Obsidian, prefer ordinary Markdown links over footnote links inside table cells (footnotes inside cells often render as plain text in Obsidian).
 
@@ -261,9 +313,12 @@ done
 | `--dry-run` total looks too small | Files already in the target cache are excluded | Re-run against a clean temp `--cache-dir` for full size |
 | Real download smaller than reported size | Xet chunk-level dedup | Expected; reported sizes are upper bounds for transfer |
 | `hf cache delete` errors | Command was renamed | Use `hf cache rm` / `hf cache prune` |
+| `hf cache ls` size disagrees with disk usage | Logical/deduplicated size differs from filesystem footprint | Use `du -sh` on the repo directory or `blobs/` |
+| `.incomplete` files exist but `hf download` says complete | Stale residue from interrupted downloads | Check snapshot symlink targets; delete unreferenced `.incomplete` after validation |
+| `hf cache prune` does not free incomplete blobs | Prune removes detached revisions only | Use `find "<hf-home>/hub" -name "*.incomplete" -delete` after validation |
 | Timeouts on slow connections | Default 10s timeouts | Raise `HF_HUB_ETAG_TIMEOUT` and `HF_HUB_DOWNLOAD_TIMEOUT` |
 | 401 / gated repo error | Missing or unauthorized token | Set `HF_TOKEN`; confirm access with `hf auth whoami` |
-| Verify reports missing files | Incomplete download | Re-run `hf download`; then `hf cache verify --fail-on-missing-files` |
+| Verify reports missing files | Incomplete download or stale metadata | Re-run `hf download`; then check snapshot links and `hf cache verify --fail-on-missing-files` |
 | Need to parse output reliably | Human-formatted text | Add `--format json` / `--json` and parse that |
 
 ## Failure Handling

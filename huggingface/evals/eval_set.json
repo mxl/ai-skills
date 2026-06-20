@@ -32,6 +32,18 @@
     "should_trigger": true
   },
   {
+    "query": "In my vault note I list three HF cache homes: laptop, nas, and external-ssd. Check whether mlx-community/gemma-4-26B-A4B-it-qat-8bit is usable in each home. Do not assume there are only main/storage caches, and explain where each cache path came from.",
+    "should_trigger": true
+  },
+  {
+    "query": "hf download LiquidAI/LFM2.5-8B-A1B-MLX-bf16 says the model is complete, but I still see a bunch of .incomplete files in the cache. Is the model actually broken? Check it by following the snapshot symlinks, not just by counting .incomplete files, and tell me which files are safe cleanup residue.",
+    "should_trigger": true
+  },
+  {
+    "query": "I have the same HF repo in several cache homes and want to delete duplicate copies from one drive. Build a per-cache matrix with usable/metadata-only/incomplete status, actual du size, and only generate rm -rf commands for copies where another cache has a usable snapshot-linked copy.",
+    "should_trigger": true
+  },
+  {
     "query": "Fine-tune this Llama model with LoRA on my support dataset and give me the training script.",
     "should_trigger": false
   },

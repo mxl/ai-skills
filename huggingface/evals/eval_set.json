@@ -1,0 +1,66 @@
+[
+  {
+    "query": "I want to get the exact on-disk size of mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit without touching my real HF caches. Use hf download --dry-run with a throwaway temp directory, parse the reported total, and tell me: (a) the full repo size, (b) whether it fits in a 45 GB remaining-space budget, and (c) the recommended shell command to actually download it to /Volumes/Storage/hf afterwards.",
+    "should_trigger": true
+  },
+  {
+    "query": "The Nemotron-3-Nano-30B model card has a comparison table showing GPT-OSS-20B column values for MMLU-Pro, AIME25, GPQA, SWE-Bench, TauBench, and RULER. The openai/gpt-oss-20b page itself shows MMLU-Pro, GPQA Diamond, SWE-bench Verified, HLE, and LEXam scores. Build a unified comparison table with both sources, mark which values came from the Nemotron page vs the GPT-OSS page, keep exact benchmark names without normalization, and note any score discrepancies between the two sources.",
+    "should_trigger": true
+  },
+  {
+    "query": "The model card for nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16 has a benchmark table. Extract all rows and values from it exactly as written — do not normalize metric names like MMLU-Pro or BFCL v4. Then tell me which metrics are unique to this page and which overlap with what is on the openai/gpt-oss-20b page.",
+    "should_trigger": true
+  },
+  {
+    "query": "I have MMLU=78.3 from the Nemotron model card and MMLU-Pro=73.6 from the gpt-oss-20b page. Are these the same benchmark? Should I merge them into one column in my comparison table or keep them separate? Also explain the difference between MMLU, MMLU-Pro, and MMLU (CoT).",
+    "should_trigger": true
+  },
+  {
+    "query": "I downloaded mlx-community/Qwen3.6-35B-A3B-OptiQ-4bit to /Volumes/Storage/hf last week but I am not sure if the download completed. How do I verify the cache is complete and not metadata-only, and what exact hf command tells me which files are missing?",
+    "should_trigger": true
+  },
+  {
+    "query": "I have a list of 46 Hugging Face model repos I want to download. Some are from mlx-community, some from lmstudio-community. What environment variables should I set for a reliable batch download to /Volumes/Storage/hf, and what is the correct shell pattern that handles HF_HOME, timeouts, and safe quoting of repo IDs?",
+    "should_trigger": true
+  },
+  {
+    "query": "My local-llm.md Obsidian note has a table where the HF ID column contains backtick-wrapped repo IDs like `mlx-community/Qwen3.6-35B-A3B-4bit`. Convert every ID in that column into a Markdown inline link to the HF model page. Footnote-style references must not be used because Obsidian does not render them inside table cells.",
+    "should_trigger": true
+  },
+  {
+    "query": "I keep two persistent HF caches: main at ~/.cache/huggingface and storage at /Volumes/Storage/hf. I want a small JSON config file that registers both by name so my workflows can reference them. What should the schema look like, and should I include my temporary dry-run cache in the same file?",
+    "should_trigger": true
+  },
+  {
+    "query": "Fine-tune this Llama model with LoRA on my support dataset and give me the training script.",
+    "should_trigger": false
+  },
+  {
+    "query": "Explain what GPQA Diamond measures and whether it is a good benchmark for reasoning models.",
+    "should_trigger": false
+  },
+  {
+    "query": "Install transformers, accelerate, and bitsandbytes into my Python virtualenv.",
+    "should_trigger": false
+  },
+  {
+    "query": "Summarize this PDF and extract the tables into CSV.",
+    "should_trigger": false
+  },
+  {
+    "query": "Deploy a Text Generation Inference server for Mistral on Kubernetes.",
+    "should_trigger": false
+  },
+  {
+    "query": "I need a PowerPoint deck comparing AI coding tools for our leadership team.",
+    "should_trigger": false
+  },
+  {
+    "query": "Debug why this React table component rerenders too often when I sort columns.",
+    "should_trigger": false
+  },
+  {
+    "query": "Download this YouTube transcript and summarize it.",
+    "should_trigger": false
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "query": "Используй skill video-summary: проанализируй видео https://example.com/video.mp4",
+    "should_trigger": true
+  },
+  {
+    "query": "Через video-summary skill транскрибируй видео ./meeting.mp4",
+    "should_trigger": true
+  },
+  {
+    "query": "Запусти workflow video-summary для YouTube playlist https://www.youtube.com/playlist?list=PLexample",
+    "should_trigger": true
+  },
+  {
+    "query": "Use the video-summary skill to summarize ./demo.mov",
+    "should_trigger": true
+  },
+  {
+    "query": "Используй video-summary-config.json presets для видео ./slides.mp4",
+    "should_trigger": true
+  },
+  {
+    "query": "Суммаризируй README.md без video-summary, это обычный markdown файл",
+    "should_trigger": false
+  }
+]

@@ -1,0 +1,87 @@
+{
+  "peepshowPresets": {
+    "audio-transcript": {
+      "transcribe": "env",
+      "strategy": "scene",
+      "max": 4,
+      "min": 1,
+      "noReport": false
+    },
+    "screen-ocr": {
+      "strategy": "scene",
+      "threshold": 0.2,
+      "max": 80,
+      "min": 8,
+      "width": 1600,
+      "ocr": true,
+      "ocrLang": "eng+rus",
+      "ocrPsm": 6
+    },
+    "visual-summary": {
+      "strategy": "scene",
+      "threshold": 0.3,
+      "max": 50,
+      "min": 6,
+      "width": 1280
+    }
+  },
+  "ocrPresets": {
+    "ocr-skill": {
+      "type": "skill",
+      "skillName": "ocr"
+    }
+  },
+  "prompts": {
+    "general-summary": {
+      "type": "fabric",
+      "pattern": "summarize"
+    },
+    "lecture-wisdom": {
+      "type": "fabric",
+      "pattern": "extract_wisdom"
+    },
+    "claims-analysis": {
+      "type": "fabric",
+      "pattern": "analyze_claims"
+    }
+  },
+  "presets": {
+    "youtube-lecture": {
+      "description": "YouTube lecture, webinar, talk, podcast, or long educational video",
+      "match": ["youtube", "lecture", "webinar", "talk", "podcast", "course", "education", "interview"],
+      "peepshowPreset": "audio-transcript",
+      "prompt": "lecture-wisdom",
+      "preferSubtitles": true,
+      "transcribeIfNoSubtitles": true,
+      "analyzeFrames": false
+    },
+    "screen-recording": {
+      "description": "Screen recording, software demo, coding session, UI walkthrough, or slide-heavy tutorial",
+      "match": ["screen", "demo", "tutorial", "walkthrough", "coding", "slides", "presentation", "webinar"],
+      "peepshowPreset": "screen-ocr",
+      "ocrPreset": "ocr-skill",
+      "prompt": "general-summary",
+      "preferSubtitles": true,
+      "transcribeIfNoSubtitles": true,
+      "analyzeFrames": true
+    },
+    "general-video": {
+      "description": "General single video summary when no specialized scenario is obvious",
+      "match": ["video", "summary", "summarize", "clip", "movie", "recording"],
+      "peepshowPreset": "visual-summary",
+      "prompt": "general-summary",
+      "preferSubtitles": true,
+      "transcribeIfNoSubtitles": true,
+      "analyzeFrames": false
+    },
+    "claims-and-news": {
+      "description": "News, opinion, debate, review, or persuasive video where claims should be checked carefully",
+      "match": ["news", "debate", "claim", "claims", "opinion", "review", "politics", "analysis"],
+      "peepshowPreset": "audio-transcript",
+      "prompt": "claims-analysis",
+      "preferSubtitles": true,
+      "transcribeIfNoSubtitles": true,
+      "analyzeFrames": false
+    }
+  }
+}

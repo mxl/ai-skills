@@ -1,0 +1,102 @@
+[
+  {
+    "query": "Проанализируй видео https://example.com/video.mp4",
+    "should_trigger": true
+  },
+  {
+    "query": "Транскрибируй видео ./meeting.mp4",
+    "should_trigger": true
+  },
+  {
+    "query": "Посмотри видео https://youtu.be/dQw4w9WgXcQ и кратко расскажи, что там происходит",
+    "should_trigger": true
+  },
+  {
+    "query": "Сделай summary video ./demo.mov",
+    "should_trigger": true
+  },
+  {
+    "query": "Вытащи кадры из видео ./screen-recording.mp4 и опиши их",
+    "should_trigger": true
+  },
+  {
+    "query": "Резюмируй YouTube видео https://www.youtube.com/watch?v=NSHmr96RQzc на русском. Если есть субтитры, предпочти их, но сначала предложи preset.",
+    "should_trigger": true
+  },
+  {
+    "query": "Суммаризируй этот YouTube playlist: https://www.youtube.com/playlist?list=PLexample. Сначала дай выбрать, какие видео обработать.",
+    "should_trigger": true
+  },
+  {
+    "query": "У меня есть локальный файл ./fixtures/demo.mp4 и рядом ./fixtures/demo.ru.vtt. Используй sidecar transcript, потом проанализируй кадры через OCR.",
+    "should_trigger": true
+  },
+  {
+    "query": "Проанализируй видео на странице https://example.com/blog/product-demo, сделай транскрибацию через peepshow и для суммаризации предложи Fabric шаблон.",
+    "should_trigger": true
+  },
+  {
+    "query": "Вот HLS поток https://cdn.example.test/live/channel.m3u8. Посмотри, что происходит визуально, и кратко опиши. Транскрипт не нужен.",
+    "should_trigger": true
+  },
+  {
+    "query": "У этого YouTube ролика нет субтитров. Транскрибируй аудио и сделай summary, кадры не анализируй: https://youtu.be/dQw4w9WgXcQ",
+    "should_trigger": true
+  },
+  {
+    "query": "В проекте есть .opencode/video-summary-config.json с preset internal-demo. Используй этот проектный preset для ./demo.mp4 и покажи, какие конфиги были смержены.",
+    "should_trigger": true
+  },
+  {
+    "query": "Используй preset raw-footage, но в нём нет prompt. Видео: ./raw-footage.mov. Мне нужен итоговый summary после выбора подходящего способа суммаризации.",
+    "should_trigger": true
+  },
+  {
+    "query": "Это политический debate video: https://video.example.test/debate.mp4. Выбери Fabric шаблон для разбора заявлений и сделай summary.",
+    "should_trigger": true
+  },
+  {
+    "query": "Для анализа кадров используй ocrPreset qwen-vl-local из video-summary-config.json. Там OpenAI-compatible baseUrl и llmApiKey через env:QWEN_KEY. Видео ./slides.mp4.",
+    "should_trigger": true
+  },
+  {
+    "query": "Суммаризируй README.md в этом репозитории. Это не видео, просто сделай обычный текстовый summary.",
+    "should_trigger": false
+  },
+  {
+    "query": "Вытащи текст из scanned-report.pdf и сохрани OCR markdown рядом с PDF.",
+    "should_trigger": false
+  },
+  {
+    "query": "Создай PowerPoint deck на 8 слайдов из этого markdown outline.",
+    "should_trigger": false
+  },
+  {
+    "query": "Проверь доступен ли домен example.ru и пример.рф для регистрации.",
+    "should_trigger": false
+  },
+  {
+    "query": "Сохрани этот meeting transcript в мой vault и выдели action items.",
+    "should_trigger": false
+  },
+  {
+    "query": "Найди в коде все места, где используется yt-dlp, и объясни архитектуру.",
+    "should_trigger": false
+  },
+  {
+    "query": "Покажи, какие fabric patterns установлены в системе, ничего не суммаризируй.",
+    "should_trigger": false
+  },
+  {
+    "query": "Проанализируй статичную картинку screenshot.png и опиши UI на ней.",
+    "should_trigger": false
+  },
+  {
+    "query": "Преобразуй subtitles.vtt в чистый transcript.txt без видео и без summary.",
+    "should_trigger": false
+  },
+  {
+    "query": "Сделай обзор изменений в git diff и найди баги.",
+    "should_trigger": false
+  }
+]

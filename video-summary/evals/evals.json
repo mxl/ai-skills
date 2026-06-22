@@ -1,0 +1,184 @@
+{
+  "skill_name": "video-summary",
+  "evals": [
+    {
+      "id": 1,
+      "name": "youtube-subtitles-preset-first",
+      "category": "youtube-single",
+      "prompt": "Резюмируй YouTube видео https://www.youtube.com/watch?v=NSHmr96RQzc на русском. Если есть субтитры, предпочти их, но сначала предложи preset.",
+      "expected_output": "Runs discovery, recommends a preset via question tool before choosing sources, prefers available subtitles in the user's language, cleans transcript.txt, builds combined-context.md, saves summary.md, and returns artifact paths.",
+      "files": [],
+      "assertions": [
+        "Runs `node video-summary/scripts/video-summary.mjs discover` before attempting subtitle download or peepshow.",
+        "Asks a preset-selection question with the top recommendation labeled `(Recommended)`.",
+        "Includes `Использовать найденные субтитры/транскрипт` as an information-source option when subtitles are found.",
+        "Prefers Russian/user-language subtitles when available.",
+        "Saves or reports paths for `transcript.txt`, `combined-context.md`, and `summary.md`."
+      ]
+    },
+    {
+      "id": 2,
+      "name": "youtube-playlist-checkbox-selection",
+      "category": "youtube-playlist",
+      "prompt": "Суммаризируй этот YouTube playlist: https://www.youtube.com/playlist?list=PLexample. Сначала дай выбрать, какие видео обработать.",
+      "expected_output": "Detects playlist entries, asks a multiple-choice question where the first option is `Все видео`, processes only selected entries, and produces per-video summaries plus a playlist summary.",
+      "files": [],
+      "assertions": [
+        "Runs discovery or playlist listing before processing entries.",
+        "Uses question tool with `multiple: true` for playlist video selection.",
+        "The first playlist checkbox option is exactly `Все видео`.",
+        "Lists individual playlist videos after the all-videos option.",
+        "Plans both per-video outputs and `playlist-summary.md`."
+      ]
+    },
+    {
+      "id": 3,
+      "name": "local-sidecar-vtt-plus-ocr",
+      "category": "local-video",
+      "prompt": "У меня есть локальный файл ./fixtures/demo.mp4 и рядом ./fixtures/demo.ru.vtt. Используй sidecar transcript, потом проанализируй кадры через OCR и сделай краткое резюме.",
+      "expected_output": "Discovers the local sidecar, cleans it with the subtitles helper, asks preset/source/frame-analysis questions, uses OCR for extracted frames, includes transcript and frame text in combined-context.md, and saves summary.md.",
+      "files": ["fixtures/demo.mp4", "fixtures/demo.ru.vtt"],
+      "assertions": [
+        "Checks for local sidecar files before choosing audio transcription.",
+        "Uses `subtitles --input-subtitle` for the sidecar transcript instead of downloading YouTube subtitles.",
+        "Asks a frame-analysis question because the user requested OCR.",
+        "Offers configured `ocrPreset` options and/or `peepshow --ocr`.",
+        "Includes frame OCR content in `combined-context.md`."
+      ]
+    },
+    {
+      "id": 4,
+      "name": "web-page-video-transcribe-fabric",
+      "category": "web-video",
+      "prompt": "Проанализируй видео на странице https://example.com/blog/product-demo, сделай транскрибацию через peepshow и для суммаризации предложи Fabric шаблон.",
+      "expected_output": "Uses yt-dlp discovery for the web page, warns that transcription requires audio download/stream processing, runs peepshow only after source selection, and asks for a Fabric pattern from a context-appropriate curated shortlist with manual entry last.",
+      "files": [],
+      "assertions": [
+        "Attempts discovery on the web page before assuming it is a direct video URL.",
+        "Includes `Транскрибировать аудиодорожку` in source choices with a download/stream warning.",
+        "Uses `peepshow-args` from the selected peepshow preset before running peepshow.",
+        "Asks a Fabric pattern question with a curated shortlist.",
+        "The final Fabric option allows entering a pattern name manually."
+      ]
+    },
+    {
+      "id": 5,
+      "name": "direct-hls-frames-required-warning",
+      "category": "stream",
+      "prompt": "Вот HLS поток https://cdn.example.test/live/channel.m3u8. Посмотри, что происходит визуально, и кратко опиши. Транскрипт не нужен.",
+      "expected_output": "Treats the input as a video stream, recommends a visual/frame-oriented preset, asks for frame analysis, warns that the video stream must be read/downloaded for frames, and does not force transcription when the user said transcript is not needed.",
+      "files": [],
+      "assertions": [
+        "Recognizes `.m3u8` as a video stream input suitable for peepshow.",
+        "Does not prioritize subtitle-only or audio transcription when the user asks for visual analysis only.",
+        "Warns that frame analysis requires reading/downloading the video stream.",
+        "Plans to parse `frames[].path` from peepshow JSON.",
+        "Does not fabricate visual details before frame extraction."
+      ]
+    },
+    {
+      "id": 6,
+      "name": "audio-only-youtube-transcription-no-full-video",
+      "category": "transcription",
+      "prompt": "У этого YouTube ролика нет субтитров. Транскрибируй аудио и сделай summary, кадры не анализируй: https://youtu.be/dQw4w9WgXcQ",
+      "expected_output": "After discovery finds no usable subtitles, asks/uses transcription source, warns that YouTube can download audio-only, avoids frame analysis, and uses peepshow transcription or appropriate audio-only handling.",
+      "files": [],
+      "assertions": [
+        "Does not require full video download for YouTube audio transcription.",
+        "Mentions audio-only download via `yt-dlp -f ba/bestaudio` or equivalent warning text.",
+        "Does not ask for or run frame analysis because the user explicitly excluded it.",
+        "Uses selected/configured transcription provider priority: config, env, then question.",
+        "Reports transcription cost/quota/download caveats."
+      ]
+    },
+    {
+      "id": 7,
+      "name": "config-merge-project-overrides-default",
+      "category": "config",
+      "prompt": "В проекте есть .opencode/video-summary-config.json с preset `internal-demo`, который переопределяет prompt `general-summary`. Используй этот проектный preset для ./demo.mp4 и покажи, какие конфиги были смержены.",
+      "expected_output": "Runs config/discovery, reports configFiles, applies project-level overrides over the skill default for duplicate keys, offers `internal-demo` among presets, and avoids leaking any raw llmApiKey.",
+      "files": [".opencode/video-summary-config.json", "demo.mp4"],
+      "assertions": [
+        "Searches for `video-summary-config.json` in the documented priority order.",
+        "Merges `peepshowPresets`, `ocrPresets`, `prompts`, and `presets` by named entry.",
+        "Higher-priority duplicate entries replace lower-priority entries completely.",
+        "Reports config file paths or merged config provenance.",
+        "Does not print raw API keys from config."
+      ]
+    },
+    {
+      "id": 8,
+      "name": "missing-prompt-fallbacks",
+      "category": "prompt-selection",
+      "prompt": "Используй preset `raw-footage`, но в нём нет prompt. Видео: ./raw-footage.mov. Мне нужен итоговый summary после выбора подходящего способа суммаризации.",
+      "expected_output": "Detects that the selected preset has no usable prompt and asks how to choose a prompt: enter custom prompt, generate one for the video type, or select a Fabric template.",
+      "files": ["raw-footage.mov", "video-summary-config.json"],
+      "assertions": [
+        "Checks whether the selected preset has a usable prompt.",
+        "If missing, asks a prompt-selection question.",
+        "Includes `Ввести свой промпт` as an option.",
+        "Includes `Сгенерировать подходящий промпт для типа видео` as an option.",
+        "Includes `Выбрать шаблон Fabric` as an option."
+      ]
+    },
+    {
+      "id": 9,
+      "name": "fabric-shortlist-context-news",
+      "category": "fabric",
+      "prompt": "Это политический debate video: https://video.example.test/debate.mp4. Выбери Fabric шаблон для разбора заявлений и сделай summary.",
+      "expected_output": "Recommends a claims/news preset or `analyze_claims` Fabric pattern, asks the Fabric shortlist question with `analyze_claims` first/recommended, and allows manual pattern entry last.",
+      "files": [],
+      "assertions": [
+        "Selects or recommends a context-appropriate claims/news path.",
+        "Includes `analyze_claims` in the Fabric shortlist.",
+        "Marks the most context-appropriate Fabric pattern as `(Recommended)`.",
+        "Puts manual Fabric pattern entry last.",
+        "If Fabric is unavailable, offers current-LLM fallback instead of failing silently."
+      ]
+    },
+    {
+      "id": 10,
+      "name": "ocr-preset-openai-compatible-secret-redaction",
+      "category": "ocr-presets",
+      "prompt": "Для анализа кадров используй ocrPreset `qwen-vl-local` из video-summary-config.json. Там OpenAI-compatible baseUrl и llmApiKey через env:QWEN_KEY. Видео ./slides.mp4.",
+      "expected_output": "Recognizes the configured llm ocrPreset, resolves env-style API key without printing it, asks/uses frame analysis, and includes OCR/vision results in combined-context.md.",
+      "files": ["video-summary-config.json", "slides.mp4"],
+      "assertions": [
+        "Accepts `ocrPreset` with `type: llm`, `llmBaseUrl`, `llmApiKey: env:...`, and `llmId`.",
+        "Does not print the resolved API key.",
+        "Does not save the raw API key in artifacts.",
+        "Asks or confirms frame-analysis method before using the OCR preset.",
+        "Uses frame outputs as part of `combined-context.md`."
+      ]
+    },
+    {
+      "id": 11,
+      "name": "manual-settings-last-option",
+      "category": "question-flow",
+      "prompt": "Сделай summary ./meeting-recording.mp4, но я хочу сам выбрать все настройки вручную: транскрипция, кадры, OCR и prompt.",
+      "expected_output": "Still runs discovery first, presents preset choices with manual settings last, then walks through manual source, frame analysis, transcription provider, peepshow options, and prompt/Fabric choices.",
+      "files": ["meeting-recording.mp4"],
+      "assertions": [
+        "Runs discovery before manual settings.",
+        "Preset question includes configured presets before manual settings.",
+        "The manual settings option is last in the preset question.",
+        "Manual flow covers transcript source, transcription provider, frame analysis, and prompt selection.",
+        "Does not skip required warnings about transcription/frame download requirements."
+      ]
+    },
+    {
+      "id": 12,
+      "name": "non-video-near-miss-should-not-proceed",
+      "category": "negative",
+      "prompt": "Суммаризируй README.md в этом репозитории. Это не видео, просто сделай обычный текстовый summary.",
+      "expected_output": "Does not use video-summary workflow, does not run video discovery, and handles this as a normal text summary or says the video-summary skill is not applicable.",
+      "files": ["README.md"],
+      "assertions": [
+        "Does not run `video-summary/scripts/video-summary.mjs discover` on a Markdown file.",
+        "Does not ask video preset/source/frame-analysis questions.",
+        "Does not invoke peepshow.",
+        "Summarizes the Markdown text directly or declines video workflow as not applicable."
+      ]
+    }
+  ]
+}

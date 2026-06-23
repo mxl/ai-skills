@@ -23,7 +23,7 @@ Use this skill for requests like:
 - "Compare metrics from the GPT-OSS page and the Nemotron comparison table"
 - "Generate `hf download` commands for these repos"
 - "Work with multiple `HF_HOME` caches"
-- "See if this model is complete in main or storage cache"
+- "See if this model is complete in one or more cache homes"
 - "Get the total size of a repo without downloading it"
 - "Reclaim disk space from my Hugging Face cache"
 - "Download only the safetensors, skip the fp16 shards"
@@ -49,7 +49,7 @@ If the user already installed the official `hf` CLI skill, this skill stays comp
 
 ## Cache Homes
 
-Assume the user may keep any number of persistent Hugging Face cache homes. Do not hardcode specific cache paths in the skill. Derive cache homes from the current context: explicit user messages, relevant notes, project config, environment variables, or previously established session context. If the user references a vault note or local model inventory, inspect that source for cache-home declarations before assuming defaults.
+Assume the user may keep any number of persistent Hugging Face cache homes. Do not hardcode specific cache paths in the skill. Derive cache homes from the current context: explicit user messages, referenced documents or inventories, workspace configuration, environment variables, or previously established session context. If the user references a note, table, inventory, or other document, inspect that source for cache-home declarations before assuming defaults.
 
 Use this conceptual shape when tracking homes during a task:
 
@@ -72,7 +72,7 @@ See `references/config-schema.md` for a stricter schema and field guidance.
 Cache-home discovery order:
 
 1. Paths explicitly supplied by the user in the current request.
-2. Paths in relevant notes, model inventories, or project docs the user points to.
+2. Paths in relevant notes, model inventories, workspace docs, or referenced documents.
 3. `HF_HOME` and `HF_HUB_CACHE` from the active shell environment.
 4. Any skill/config file the user has set up for persistent HF homes.
 5. The Hugging Face default home only if no other source is available.
@@ -304,7 +304,7 @@ done
 - For cache audits, report status per discovered cache home. Prefer statuses like `usable`, `usable + stale incomplete`, `incomplete`, `metadata-only`, and `missing` instead of a single global downloaded/not-downloaded flag.
 - For cleanup reports, separate logical repo size, actual disk usage from `du`, and bytes that will be reclaimed.
 - For benchmark comparisons, call out source mismatches explicitly.
-- If using inline links in Markdown tables for Obsidian, prefer ordinary Markdown links over footnote links inside table cells (footnotes inside cells often render as plain text in Obsidian).
+- If using inline links in Markdown tables, prefer ordinary Markdown links over footnote links inside table cells; many Markdown renderers do not handle footnotes reliably inside tables.
 
 ## Troubleshooting
 

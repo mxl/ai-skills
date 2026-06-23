@@ -1,6 +1,6 @@
 [
   {
-    "query": "I want to get the exact on-disk size of mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit without touching my real HF caches. Use hf download --dry-run with a throwaway temp directory, parse the reported total, and tell me: (a) the full repo size, (b) whether it fits in a 45 GB remaining-space budget, and (c) the recommended shell command to actually download it to /Volumes/Storage/hf afterwards.",
+    "query": "I want to get the exact on-disk size of mlx-community/Qwen3-Next-80B-A3B-Instruct-4bit without touching my real HF caches. Use hf download --dry-run with a throwaway temp directory, parse the reported total, and tell me: (a) the full repo size, (b) whether it fits in a 45 GB remaining-space budget, and (c) the recommended shell command to actually download it to /data/hf-cache afterwards.",
     "should_trigger": true
   },
   {
@@ -16,23 +16,23 @@
     "should_trigger": true
   },
   {
-    "query": "I downloaded mlx-community/Qwen3.6-35B-A3B-OptiQ-4bit to /Volumes/Storage/hf last week but I am not sure if the download completed. How do I verify the cache is complete and not metadata-only, and what exact hf command tells me which files are missing?",
+    "query": "I downloaded mlx-community/Qwen3.6-35B-A3B-OptiQ-4bit to /data/hf-cache last week but I am not sure if the download completed. How do I verify the cache is complete and not metadata-only, and what exact hf command tells me which files are missing?",
     "should_trigger": true
   },
   {
-    "query": "I have a list of 46 Hugging Face model repos I want to download. Some are from mlx-community, some from lmstudio-community. What environment variables should I set for a reliable batch download to /Volumes/Storage/hf, and what is the correct shell pattern that handles HF_HOME, timeouts, and safe quoting of repo IDs?",
+    "query": "I have a list of 46 Hugging Face model repos I want to download. Some are from mlx-community, some from lmstudio-community. What environment variables should I set for a reliable batch download to /data/hf-cache, and what is the correct shell pattern that handles HF_HOME, timeouts, and safe quoting of repo IDs?",
     "should_trigger": true
   },
   {
-    "query": "My local-llm.md Obsidian note has a table where the HF ID column contains backtick-wrapped repo IDs like `mlx-community/Qwen3.6-35B-A3B-4bit`. Convert every ID in that column into a Markdown inline link to the HF model page. Footnote-style references must not be used because Obsidian does not render them inside table cells.",
+    "query": "My model-inventory.md Markdown note has a table where the HF ID column contains backtick-wrapped repo IDs like `mlx-community/Qwen3.6-35B-A3B-4bit`. Convert every ID in that column into a Markdown inline link to the HF model page. Footnote-style references must not be used because many Markdown renderers do not handle them inside table cells.",
     "should_trigger": true
   },
   {
-    "query": "I keep two persistent HF caches: main at ~/.cache/huggingface and storage at /Volumes/Storage/hf. I want a small JSON config file that registers both by name so my workflows can reference them. What should the schema look like, and should I include my temporary dry-run cache in the same file?",
+    "query": "I keep two persistent HF caches: default at /data/hf-default and external at /mnt/models/hf. I want a small JSON config file that registers both by name so my workflows can reference them. What should the schema look like, and should I include my temporary dry-run cache in the same file?",
     "should_trigger": true
   },
   {
-    "query": "In my vault note I list three HF cache homes: laptop, nas, and external-ssd. Check whether mlx-community/gemma-4-26B-A4B-it-qat-8bit is usable in each home. Do not assume there are only main/storage caches, and explain where each cache path came from.",
+    "query": "In my model inventory note I list three HF cache homes: laptop, nas, and external-ssd. Check whether mlx-community/gemma-4-26B-A4B-it-qat-8bit is usable in each home. Do not assume there are only two caches, and explain where each cache path came from.",
     "should_trigger": true
   },
   {

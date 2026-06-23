@@ -7,7 +7,7 @@ Use a small JSON file to describe the user's persistent Hugging Face cache direc
 This config exists so the skill can:
 
 - inspect more than one `HF_HOME` without hardcoding paths;
-- distinguish the user's main cache from external storage;
+- distinguish cache homes by stable user-defined names;
 - generate reproducible `hf` commands with the correct target cache;
 - avoid treating temporary dry-run caches as persistent state.
 
@@ -17,12 +17,12 @@ This config exists so the skill can:
 {
   "homes": [
     {
-      "name": "main",
-      "path": "~/.cache/huggingface"
+      "name": "default",
+      "path": "/path/to/default/hf-home"
     },
     {
-      "name": "storage",
-      "path": "/Volumes/Storage/hf"
+      "name": "external",
+      "path": "/path/to/external/hf-home"
     }
   ]
 }
@@ -40,7 +40,7 @@ This config exists so the skill can:
 
 - Required.
 - Short identifier used in reports and command generation.
-- Recommended values for this skill: `main`, `storage`.
+- Choose names that are short, stable, and meaningful in the user's environment, such as `default`, `external`, `workstation`, or `archive`.
 - Keep names stable once the user starts relying on them in workflows.
 
 ### `homes[].path`

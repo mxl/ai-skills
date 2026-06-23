@@ -1,0 +1,54 @@
+{
+  "skill_name": "domain-suggest",
+  "evals": [
+    {
+      "id": 1,
+      "name": "english-startup-suggestions",
+      "prompt": "Suggest some domain names for my AI sales assistant. Prefer .com or .ai.",
+      "expected_output": "Triggers domain-suggest, generates candidates with multiple techniques, verifies availability via the domain-check script, and returns a ranked shortlist grouped by zone with rationales.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "russian-project-brainstorm",
+      "prompt": "Придумай домен для нового проекта про доставку еды.",
+      "expected_output": "Triggers domain-suggest, asks at most one short clarifying question if needed, generates and verifies candidates, and answers in Russian.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "more-variants-with-keyword",
+      "prompt": "Подбери ещё варианты доменов со словом care, без help.",
+      "expected_output": "Triggers domain-suggest, generates care-based candidates honoring the exclude constraint, verifies availability, and lists available options.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "name-the-company",
+      "prompt": "Help me name my fintech startup and find an available domain. Short, brandable, no hyphens.",
+      "expected_output": "Triggers domain-suggest, applies SMILE/SCRATCH and constraints, generates brandable coined/suggestive names, checks availability, and recommends a top pick plus runner-up.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "negative-exact-check",
+      "prompt": "Is example-test-2026.ru available? Check exactly this name.",
+      "expected_output": "Does NOT trigger domain-suggest because exact domains were provided for an availability check; routes to domain-check instead.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "negative-registration",
+      "prompt": "Register my-dream-site.com for me now.",
+      "expected_output": "Does NOT trigger domain-suggest; this is a registration/purchase request outside the skill's scope.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "negative-dns",
+      "prompt": "Change the NS records for example.ru to Cloudflare.",
+      "expected_output": "Does NOT trigger domain-suggest; this is DNS management outside the skill's scope.",
+      "files": []
+    }
+  ]
+}

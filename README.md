@@ -2,7 +2,7 @@
 
 Reusable [Agent Skills](https://agentskills.io) for OpenCode and compatible coding assistants. This repository packages task-specific instructions, references, evals, fixtures, and deterministic helper scripts for workflows that benefit from repeatable handling instead of ad-hoc prompting.
 
-The current collection focuses on document automation, OCR, PDFs, video summaries, meeting transcript storage, and domain availability checks.
+The current collection focuses on document automation, OCR, PDFs, video summaries, meeting transcript storage, domain availability checks, and domain/name suggestion.
 
 The `docx` and `pptx` skills share a common OOXML engine in [`common/ooxml/`](common/ooxml/) that provides ZIP-safety checks, XML utilities, and a generic unpack/pack/validate engine parameterized by format-specific profiles.
 
@@ -18,6 +18,7 @@ The `docx` and `pptx` skills share a common OOXML engine in [`common/ooxml/`](co
 | [`meeting-transcript`](meeting-transcript/) | Save meeting transcripts and verified summaries into an Obsidian-style vault. | Storage rules, summary verification, action-item extraction guidance |
 | [`regru`](regru/) | Check exact domain names for availability through REG.RU API 2. | Self-contained REG.RU `domain/check` CLI with optional client SSL auth |
 | [`domain-check`](domain-check/) | Check exact domain availability for .ru, .рф, and other TLDs using public registry signals (RDAP/WHOIS). | No-API availability CLI with IDN support |
+| [`domain-suggest`](domain-suggest/) | Brainstorm brandable domain/name ideas for a startup, product, or project, then verify availability by delegating to `domain-check`. | Naming methodology + generation-technique references; reuses the no-API availability CLI |
 
 ## Installation
 
@@ -50,6 +51,7 @@ ln -s /path/to/ai-skills/video-summary ~/.claude/skills/video-summary
 ln -s /path/to/ai-skills/meeting-transcript ~/.claude/skills/meeting-transcript
 ln -s /path/to/ai-skills/regru ~/.claude/skills/regru
 ln -s /path/to/ai-skills/domain-check ~/.claude/skills/domain-check
+ln -s /path/to/ai-skills/domain-suggest ~/.claude/skills/domain-suggest
 ```
 
 For project-local installation, create the same symlinks under that project's `.claude/skills/` directory.
@@ -93,7 +95,9 @@ ai-skills/
 │   └── ooxml/              # shared OOXML engine (docx + pptx)
 ├── .docs/
 │   ├── docx-research.md
-│   └── pptx-research.md
+│   ├── pptx-research.md
+│   ├── domain-suggest-research.md
+│   └── domain-check-improvements-from-naming-research.md
 ├── .github/workflows/
 │   └── docx-validation.yml
 ├── docx/
@@ -129,6 +133,10 @@ ai-skills/
 ├── domain-check/
 │   ├── SKILL.md
 │   ├── scripts/
+│   └── evals/
+├── domain-suggest/
+│   ├── SKILL.md
+│   ├── references/
 │   └── evals/
 ├── generated/              # ignored output directory for skill development artifacts
 └── tests/                  # shared test utilities

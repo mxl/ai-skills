@@ -1,6 +1,6 @@
 ---
 name: pdf
-description: Use when tasks involve PDF files: reading or extracting text/tables, creating PDFs, merging/splitting/rotating pages, adding watermarks, reviewing metadata, filling forms, rendering pages, or checking final PDF layout. If the user mentions a .pdf file or asks to produce one, use this skill. For scanned PDFs, image-only PDFs, screenshots, photos of documents, or garbled/empty text extraction, use the ocr skill first, then return here for PDF assembly or final review.
+description: "Use when tasks involve PDF files: reading or extracting text/tables, creating PDFs, merging/splitting/rotating pages, adding watermarks, reviewing metadata, filling forms, rendering pages, or checking final PDF layout. If the user mentions a .pdf file or asks to produce one, use this skill. For scanned PDFs, image-only PDFs, screenshots, photos of documents, or garbled/empty text extraction, use the ocr skill first, then return here for PDF assembly or final review."
 ---
 
 # PDF Skill

@@ -1,6 +1,6 @@
 ---
 name: meeting-transcript
-description: Use this skill whenever the user asks to save a meeting transcript, improve or verify a meeting summary against a transcript, log meeting notes, or connect a meeting to a project, opportunity, area, or person. Also trigger when the user pastes raw transcript text (lines starting with "Me:", "Them:", or containing "Meeting Title:" / "Date:" headers) or a meeting summary block, even without an explicit save command. Use job-search instead for job-search interview notes where the user explicitly asks to process an interview for an opportunity.
+description: MUST use before any file writes whenever the user asks to save a meeting transcript, improve or verify a meeting summary against a transcript, log meeting notes, or connect a meeting to a project, opportunity, area, or person. Also trigger when the user pastes raw transcript text (lines starting with "Me:", "Them:", or containing "Meeting Title:" / "Date:" headers) or a meeting summary block, even without an explicit save command. Use job-search instead for job-search interview notes where the user explicitly asks to process an interview for an opportunity.
 license: MIT
 compatibility: opencode
 metadata:
@@ -22,6 +22,9 @@ This skill saves meeting transcripts and verified summaries into the Obsidian va
 - Update `updated:` when materially changing an existing note with frontmatter.
 - Do not externally share transcript or summary content without explicit user approval.
 - After saving a summary, always extract action items from the transcript and always offer to create Todoist tasks. Do not create them without user confirmation.
+- Pre-write gate: before any `Write` or `Edit` call, explicitly identify the mode (`generate-summary`, `improve`, or `save`) and target folder. If the mode or target is unclear, stop and ask before editing.
+- Never write a placeholder transcript. If the full transcript is not available in the current context, ask the user for the transcript export or source file instead of creating `transcript.md`.
+- If this workflow was skipped or partially followed, immediately rerun this skill workflow, correct the files, and report what was fixed.
 
 ## Trigger Classification
 
@@ -107,6 +110,8 @@ Create `transcript.md` with:
 
 Place the original transcript under the transcript-body heading from the template. Preserve it verbatim. It is acceptable to add metadata above the transcript, but do not edit the transcript body.
 
+Verbatim means copy all available transcript lines exactly as provided in the user message or source file. Do not summarize, shorten, normalize, repair language, remove garbled words, or replace the body with a note that the transcript was provided elsewhere.
+
 ## Generating Summary From Transcript
 
 When a transcript is available, first generate an independent working summary from the transcript before using any provided summary.
@@ -183,7 +188,9 @@ Render placeholder headings and labels according to the active project or vault 
 
 After saving `summary.md`, always inspect `## Action Items` and always offer to create Todoist tasks — even when the user did not explicitly ask for it.
 
-Before offering Todoist creation, show the extracted action items in the final response. The user should be able to choose tasks directly from the visible list.
+Order is mandatory: first show the extracted Action Items table to the user, then ask whether to create Todoist tasks. Never call `question` for Todoist, and never ask for Todoist confirmation, before the user has seen the Action Items table in assistant text.
+
+The user should be able to choose tasks directly from the visible list.
 
 Always offer these options:
 
@@ -209,11 +216,11 @@ Report concisely:
 - path to `summary.md`, if saved;
 - contradictions found and how they were resolved;
 - unconfirmed claims that remain marked;
-- action items extracted from transcript: include the Action Items table from `summary.md`;
+- action items extracted from transcript: include the Action Items table from `summary.md` before asking any Todoist question;
 - Todoist status: tasks created, or offer to create, or no actionable items found;
 - any residual missing metadata, such as unknown participants or date.
 
-When action items exist, show them in the final response as a Markdown table with task, owner, and due date, so the user can immediately review them and decide whether to create Todoist tasks.
+When action items exist, show them in the final response as a Markdown table with task, owner, and due date, then ask: `Создать Todoist-задачи: все / выборочно / пропустить?` Do not use the `question` tool for this first Todoist prompt.
 
 ## Quality Checklist
 
@@ -223,10 +230,12 @@ Before finishing, check:
 - Target folder follows active project or vault instructions; no project-specific root path was assumed by the skill.
 - Date and slug are correct.
 - Transcript body was preserved verbatim.
+- No placeholder transcript was written.
 - Summary links to `[[transcript]]`.
 - Summary claims are supported, marked unconfirmed, or resolved with the user.
 - Action items are always extracted from transcript, even implicit ones.
 - Action items are concrete enough before offering Todoist creation.
 - Final response includes the Action Items table when action items exist.
+- Todoist offer appears only after the visible Action Items table.
 - Todoist offer is always made in the final response.
 - Existing frontmatter `updated:` was updated when modifying an existing note.

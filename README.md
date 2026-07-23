@@ -13,6 +13,7 @@ The `docx` and `pptx` skills share a common OOXML engine in [`common/ooxml/`](co
 | [`docx`](docx/) | Create, read, edit, inspect, sanitize, validate, convert, and extract Microsoft Word `.docx` and legacy `.doc` files. | Safe OOXML unpack/pack, validation, extraction, conversion, template filling, metadata sanitization |
 | [`pptx`](pptx/) | Create, read, edit, inspect, sanitize, validate, convert, and extract Microsoft PowerPoint `.pptx` and legacy `.ppt` files. | PptxGenJS generation, safe OOXML unpack/pack, validation, extraction, slide thumbnails, template filling |
 | [`ocr`](ocr/) | Extract text from scanned PDFs, screenshots, photos, forms, receipts, and image-only documents. | OCR probing, page preprocessing, quality reports, optional searchable PDF generation |
+| [`healthos`](healthos/) | Build a Git-tracked family health document corpus from external PDFs/images. | Delegates to the shared OCR engine, family routing, immutable cache, source write guards |
 | [`pdf`](pdf/) | Read, extract, create, merge, split, render, inspect, and verify PDF files. | Tool-routing guidance and visual verification workflow |
 | [`video-summary`](video-summary/) | Summarize YouTube videos/playlists, web videos, local video files, streams, transcripts, audio, and frames. | Configurable presets, `yt-dlp` subtitle helper, `peepshow` orchestration, Fabric prompt routing |
 | [`meeting-transcript`](meeting-transcript/) | Save meeting transcripts and verified summaries into an Obsidian-style vault. | Storage rules, summary verification, action-item extraction guidance |
@@ -46,6 +47,7 @@ mkdir -p ~/.claude/skills
 ln -s /path/to/ai-skills/docx ~/.claude/skills/docx
 ln -s /path/to/ai-skills/pptx ~/.claude/skills/pptx
 ln -s /path/to/ai-skills/ocr ~/.claude/skills/ocr
+ln -s /path/to/ai-skills/healthos ~/.claude/skills/healthos
 ln -s /path/to/ai-skills/pdf ~/.claude/skills/pdf
 ln -s /path/to/ai-skills/video-summary ~/.claude/skills/video-summary
 ln -s /path/to/ai-skills/meeting-transcript ~/.claude/skills/meeting-transcript
@@ -77,11 +79,13 @@ Install only the dependencies required by the skills you use.
 | `docxtpl` | `docx` — template filling | `python3 -m pip install docxtpl` |
 | `pandoc` | `docx`, `pptx` — higher-fidelity conversion | `brew install pandoc` |
 | LibreOffice | `docx`, `pptx` — `.doc`/`.ppt` conversion and PDF rendering | `brew install --cask libreoffice` |
-| `poppler` | `pptx` — slide thumbnails; `pdf`, `ocr` — rendering | `brew install poppler` |
+| `poppler` | `pptx` — slide thumbnails; `pdf`, `ocr`, `healthos` — PDF inspection/rendering | `brew install poppler` |
+| `PyYAML` | `healthos` — family configuration | `python3 -m pip install PyYAML` |
 | `tesseract` | `ocr` | `brew install tesseract` |
 | `yt-dlp` | `video-summary` | `python3 -m pip install yt-dlp` |
 | REG.RU partner API credentials | `regru` | Set `REGRU_USERNAME` and `REGRU_PASSWORD`; optionally `REGRU_SSL_CERT_PATH` and `REGRU_SSL_KEY_PATH`. REG.RU `domain/check` requires partner/reseller access. |
 | WhoisXML API key | `domain-check` | Set `WHOISXML_API_KEY` environment variable (only for legacy WhoisXML fallback). |
+| OCR engine | `healthos` | Set `AGENT_HEALTH_ENGINE`; for `vision-api`, also set `AGENT_HEALTH_VISION_API_URL`, `AGENT_HEALTH_VISION_API_KEY`, and `AGENT_HEALTH_VISION_MODEL`. |
 
 Some workflows have optional fallback tools. See each skill's `SKILL.md` for task-specific requirements.
 

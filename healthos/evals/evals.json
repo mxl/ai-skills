@@ -1,0 +1,23 @@
+{
+  "skill_name": "healthos",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Recognize an external folder of family medical PDFs and photos into Markdown, route documents by person, and keep source files outside the vault.",
+      "expected_output": "Agent loads the skill, checks AGENT_HEALTH_* configuration, runs recognition, and reports index/unassigned results without medical interpretation.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Refresh the Markdown medical-document corpus after new scans were added. Do not send unchanged files through the OCR engine again.",
+      "expected_output": "Agent delegates OCR to ocr/scripts/ocr.py using AGENT_HEALTH_ENGINE, reuses source/profile cache, and preserves unchanged outputs.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Verify that recognized family medical documents are reproducible and that the external source folder was not modified.",
+      "expected_output": "Agent runs --check, verifies source manifest and generated Markdown, and reports mismatches without writing.",
+      "files": []
+    }
+  ]
+}

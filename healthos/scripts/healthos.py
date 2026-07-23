@@ -97,15 +97,31 @@ def is_within(path: Path, root: Path) -> bool:
 
 
 def validate_roots(sources: Iterable[Path], target: Path, cache: Path) -> None:
-    roots = [(f"source[{i}]", src) for i, src in enumerate(sources)]
-    roots += [("target", target), ("cache", cache)]
-    for index, (left_name, left) in enumerate(roots):
-        for right_name, right in roots[index + 1 :]:
+    # Sources are read-only inputs and must never overlap each other, the
+    # target, or the cache — otherwise a scan could pick up generated output.
+    named_sources = [(f"source[{i}]", src) for i, src in enumerate(sources)]
+    strict = named_sources + [("target", target), ("cache", cache)]
+    for index, (left_name, left) in enumerate(strict):
+        for right_name, right in strict[index + 1 :]:
+            # target/cache may be nested (cache inside target); handle separately.
+            if {left_name, right_name} == {"target", "cache"}:
+                continue
             if left == right or is_within(left, right) or is_within(right, left):
                 raise RecognitionError(
                     f"{left_name} and {right_name} must be separate, non-nested paths: "
                     f"{left} / {right}"
                 )
+    # The cache may live inside the target (the user is responsible for keeping
+    # it out of version control). The reverse would bury tracked output inside
+    # the cache, so it stays forbidden, as does using one path for both.
+    if target == cache:
+        raise RecognitionError(
+            f"target and cache must not be the same path: {target}"
+        )
+    if is_within(target, cache):
+        raise RecognitionError(
+            f"target must not be nested inside cache: {target} / {cache}"
+        )
 
 
 def parse_source_dirs(value: str) -> tuple[Path, ...]:

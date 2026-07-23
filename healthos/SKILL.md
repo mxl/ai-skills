@@ -90,6 +90,12 @@ Optional overrides:
 - `AGENT_HEALTH_OCR_TIMEOUT_SECONDS` — per-document OCR timeout (default `600`).
 - `AGENT_HEALTH_OCR_SCRIPT` — override the auto-detected `ocr/scripts/ocr.py` path.
 
+`AGENT_HEALTH_CACHE_DIR` may live inside `AGENT_HEALTH_TARGET_DIR` (e.g.
+`03-areas/health/.healthos-cache`). The cache holds raw OCR output, so keep it
+out of version control yourself (for example via `.gitignore`) — HealthOS does
+not manage that for you. The reverse nesting (target inside cache) and using one
+path for both remain disallowed, and neither may overlap any source directory.
+
 Never write token values to files or logs. Do not create `.env` files in the
 vault or skill repository.
 

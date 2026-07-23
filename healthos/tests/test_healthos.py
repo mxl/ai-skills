@@ -244,6 +244,32 @@ def test_rejects_nested_roots():
         MODULE.validate_roots([source], source / "target", Path("/tmp/cache"))
 
 
+def test_cache_may_live_inside_target():
+    source = Path("/tmp/source")
+    target = Path("/tmp/target")
+    MODULE.validate_roots([source], target, target / ".cache")
+
+
+def test_target_inside_cache_is_rejected():
+    source = Path("/tmp/source")
+    cache = Path("/tmp/cache")
+    with pytest.raises(MODULE.RecognitionError, match="nested inside cache"):
+        MODULE.validate_roots([source], cache / "target", cache)
+
+
+def test_target_equals_cache_is_rejected():
+    source = Path("/tmp/source")
+    shared = Path("/tmp/shared")
+    with pytest.raises(MODULE.RecognitionError, match="same path"):
+        MODULE.validate_roots([source], shared, shared)
+
+
+def test_cache_inside_source_is_rejected():
+    source = Path("/tmp/source")
+    with pytest.raises(MODULE.RecognitionError):
+        MODULE.validate_roots([source], Path("/tmp/target"), source / ".cache")
+
+
 def test_yaml_scalar_sanitizes_control_chars():
     scalar = MODULE.yaml_scalar('line1\nline2\ttab "quote"')
     parsed = yaml.safe_load(f"value: {scalar}")

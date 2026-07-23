@@ -90,7 +90,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "AGENT_HEALTH_SOURCE_DIR": str(source),
         "AGENT_HEALTH_TARGET_DIR": str(target),
         "AGENT_HEALTH_CACHE_DIR": str(cache),
-        "AGENT_HEALTH_ENGINE": "tesseract",
+        "AGENT_HEALTH_OCR_ENGINE": "tesseract",
         "AGENT_HEALTH_OCR_SCRIPT": str(ocr_script),
         "AGENT_HEALTH_TIMEOUT_SECONDS": "30",
         "FAKE_OCR_LOG": str(ocr_log),
@@ -154,7 +154,7 @@ def test_build_ocr_command_passes_engine(workspace):
 def test_vision_api_env_maps_to_ocr_flags(workspace, monkeypatch):
     source, _, _, _ = workspace
     (source / "child.png").write_bytes(PNG_1X1)
-    monkeypatch.setenv("AGENT_HEALTH_ENGINE", "vision-api")
+    monkeypatch.setenv("AGENT_HEALTH_OCR_ENGINE", "vision-api")
     monkeypatch.setenv("AGENT_HEALTH_VISION_API_URL", "http://vision.test/v1")
     monkeypatch.setenv("AGENT_HEALTH_VISION_API_KEY", "secret-token")
     monkeypatch.setenv("AGENT_HEALTH_VISION_MODEL", "vision-model")
@@ -180,7 +180,7 @@ def test_vision_api_env_maps_to_ocr_flags(workspace, monkeypatch):
     ],
 )
 def test_vision_api_requires_all_config(workspace, monkeypatch, missing):
-    monkeypatch.setenv("AGENT_HEALTH_ENGINE", "vision-api")
+    monkeypatch.setenv("AGENT_HEALTH_OCR_ENGINE", "vision-api")
     monkeypatch.setenv("AGENT_HEALTH_VISION_API_URL", "http://vision.test/v1")
     monkeypatch.setenv("AGENT_HEALTH_VISION_API_KEY", "secret-token")
     monkeypatch.setenv("AGENT_HEALTH_VISION_MODEL", "vision-model")
@@ -290,7 +290,7 @@ def test_multiple_source_dirs_route_by_basename(tmp_path, monkeypatch):
         "AGENT_HEALTH_SOURCE_DIR": f"{src_child}:{src_adult}",
         "AGENT_HEALTH_TARGET_DIR": str(target),
         "AGENT_HEALTH_CACHE_DIR": str(cache),
-        "AGENT_HEALTH_ENGINE": "tesseract",
+        "AGENT_HEALTH_OCR_ENGINE": "tesseract",
         "AGENT_HEALTH_OCR_SCRIPT": str(ocr_script),
         "AGENT_HEALTH_TIMEOUT_SECONDS": "30",
     }

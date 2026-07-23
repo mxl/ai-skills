@@ -85,7 +85,7 @@ Install only the dependencies required by the skills you use.
 | `yt-dlp` | `video-summary` | `python3 -m pip install yt-dlp` |
 | REG.RU partner API credentials | `regru` | Set `REGRU_USERNAME` and `REGRU_PASSWORD`; optionally `REGRU_SSL_CERT_PATH` and `REGRU_SSL_KEY_PATH`. REG.RU `domain/check` requires partner/reseller access. |
 | WhoisXML API key | `domain-check` | Set `WHOISXML_API_KEY` environment variable (only for legacy WhoisXML fallback). |
-| OCR engine | `healthos` | Set `AGENT_HEALTH_ENGINE`; for `vision-api`, also set `AGENT_HEALTH_VISION_API_URL`, `AGENT_HEALTH_VISION_API_KEY`, and `AGENT_HEALTH_VISION_MODEL`. |
+| OCR engine | `healthos` | Set `AGENT_HEALTH_OCR_ENGINE`; for `vision-api`, also set `AGENT_HEALTH_VISION_API_URL`, `AGENT_HEALTH_VISION_API_KEY`, and `AGENT_HEALTH_VISION_MODEL`. |
 
 Some workflows have optional fallback tools. See each skill's `SKILL.md` for task-specific requirements.
 

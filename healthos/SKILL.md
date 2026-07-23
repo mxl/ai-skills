@@ -13,7 +13,7 @@ description: >
   and structure, delegates recognition to the ocr skill selected through
   AGENT_HEALTH_* environment variables, never interprets medical content, and
   keeps source documents outside the vault.
-compatibility: Python 3.10+, PyYAML, openai (for vision-api), the sibling ocr skill (ocr/scripts/ocr.py), poppler, plus whichever OCR engine AGENT_HEALTH_ENGINE selects
+compatibility: Python 3.10+, PyYAML, openai (for vision-api), the sibling ocr skill (ocr/scripts/ocr.py), poppler, plus whichever OCR engine AGENT_HEALTH_OCR_ENGINE selects
 ---
 
 # HealthOS
@@ -64,7 +64,7 @@ ask before running.
 AGENT_HEALTH_SOURCE_DIR=/absolute/path/to/source
 AGENT_HEALTH_TARGET_DIR=/absolute/path/to/vault/03-areas/health
 AGENT_HEALTH_CACHE_DIR=~/Library/Caches/healthos
-AGENT_HEALTH_ENGINE=vision-api
+AGENT_HEALTH_OCR_ENGINE=vision-api
 AGENT_HEALTH_TIMEOUT_SECONDS=600
 ```
 
@@ -73,10 +73,10 @@ AGENT_HEALTH_TIMEOUT_SECONDS=600
 each document's path is prefixed by its source directory name, so those names
 must be unique and can be targeted from `family.yaml` `source_roots`.
 
-`AGENT_HEALTH_ENGINE` is passed to `ocr.py --engine` (for example
+`AGENT_HEALTH_OCR_ENGINE` is passed to `ocr.py --engine` (for example
 `tesseract`, `easyocr`, `paddleocr`, or `vision-api`).
 
-When `AGENT_HEALTH_ENGINE=vision-api`, also set:
+When `AGENT_HEALTH_OCR_ENGINE=vision-api`, also set:
 
 ```text
 AGENT_HEALTH_VISION_API_URL=http://127.0.0.1:1234/v1

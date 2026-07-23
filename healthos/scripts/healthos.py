@@ -149,7 +149,7 @@ def load_config() -> Config:
     cache = expanded_path(required_env("AGENT_HEALTH_CACHE_DIR"))
     validate_roots(sources, target, cache)
 
-    engine = required_env("AGENT_HEALTH_ENGINE")
+    engine = required_env("AGENT_HEALTH_OCR_ENGINE")
 
     vision_api_url: str | None = None
     vision_api_key: str | None = None

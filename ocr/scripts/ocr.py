@@ -54,6 +54,28 @@ SCRIPT_TO_LANG: dict[str, str] = {
     "armenian":    "hye",
 }
 
+# tesseract language code → PaddleOCR language code (primary code only)
+TESS_TO_PADDLE_LANG: dict[str, str] = {
+    "eng":     "en",
+    "rus":     "ru",
+    "chi_sim": "ch",
+    "chi_tra": "chinese_cht",
+    "jpn":     "japan",
+    "kor":     "korean",
+    "ara":     "arabic",
+    "hin":     "hi",
+    "ben":     "bn",
+    "ell":     "el",
+    "heb":     "he",
+    "tha":     "th",
+    "fra":     "fr",
+    "deu":     "german",
+    "spa":     "es",
+    "ita":     "it",
+    "por":     "pt",
+    "vie":     "vi",
+}
+
 DEFAULT_MIN_CONF = 60.0
 DEFAULT_PSM = 3
 SMALL_WIDTH_THRESHOLD = 1400  # px — upscale if narrower
@@ -109,6 +131,18 @@ class Caps:
             _fatal("tesseract binary not found.\n"
                    "Install: brew install tesseract tesseract-lang  (macOS)\n"
                    "         sudo apt install tesseract-ocr tesseract-ocr-all  (Ubuntu)",
+                   EXIT_MISSING_BINARY)
+
+    def require_paddleocr(self):
+        # Detect only when the paddleocr engine is actually selected — the import
+        # is heavy, so it is never attempted at startup.
+        try:
+            __import__("paddleocr")
+        except ImportError:
+            _fatal("paddleocr not installed.\n"
+                   "Install: uv run --with paddleocr,paddlepaddle python3 ocr.py ... "
+                   "--engine paddleocr\n"
+                   "Note: first run downloads OCR models.",
                    EXIT_MISSING_BINARY)
 
     def require_pdftotext(self):
@@ -440,7 +474,7 @@ def _preprocess_basic(img_path: str, out_path: str, verbose: bool) -> str:
         img = img.resize((w * 2, h * 2), Image.LANCZOS)
         _log(f"upscaled {w}×{h} → {w*2}×{h*2}", verbose)
     gray = img.convert("L")
-    enhanced = ImageEnhance.Contrast(gray).enhance(1.3)
+    enhanced = ImageEnhance.Contrast(gray).enhance(1.5)
     sharpened = enhanced.filter(ImageFilter.SHARPEN)
     sharpened.save(out_path)
     return out_path
@@ -667,6 +701,87 @@ def ocr_easyocr(img_path: str, caps: Caps, verbose: bool = False) -> tuple[str, 
     return full_text, mean_conf, words
 
 
+# ── PaddleOCR (opt-in, 3.x) ──────────────────────────────────────────────────
+
+_PADDLE_CACHE: dict[str, Any] = {}
+
+
+def resolve_paddle_lang(lang: str) -> str:
+    """Map a tesseract lang spec (possibly 'rus+eng') to a PaddleOCR code.
+    Takes the primary code before '+', maps via TESS_TO_PADDLE_LANG, default 'en'.
+    """
+    primary = (lang or "").split("+", 1)[0].strip().lower()
+    if primary in ("", "auto"):
+        return "en"
+    return TESS_TO_PADDLE_LANG.get(primary, "en")
+
+
+def _poly_bbox(poly: Any) -> list[int]:
+    """[[x,y],...] → [min_x, min_y, w, h]."""
+    xs = [int(p[0]) for p in poly]
+    ys = [int(p[1]) for p in poly]
+    return [min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys)]
+
+
+def _parse_paddle_result(result: Any) -> tuple[str, float, list[dict]]:
+    """
+    Parse PaddleOCR 3.x predict() output into (text, mean_conf, words).
+    Each result item exposes rec_texts, rec_scores, rec_polys (or dt_polys).
+    Words are sorted top-to-bottom, left-to-right for reading order.
+    Pure helper — accepts any object/dict with those fields (testable via stub).
+    """
+    words: list[dict] = []
+    scores: list[float] = []
+
+    for item in result:
+        def _get(name: str, default: Any = None) -> Any:
+            if isinstance(item, dict):
+                return item.get(name, default)
+            return getattr(item, name, default)
+
+        texts = _get("rec_texts") or []
+        confs = _get("rec_scores") or []
+        polys = _get("rec_polys")
+        if polys is None:
+            polys = _get("dt_polys") or []
+
+        for i, txt in enumerate(texts):
+            if not str(txt).strip():
+                continue
+            score = float(confs[i]) if i < len(confs) else 0.0
+            poly = polys[i] if i < len(polys) else [[0, 0], [0, 0], [0, 0], [0, 0]]
+            words.append({
+                "text": str(txt),
+                "conf": int(score * 100),
+                "bbox": _poly_bbox(poly),
+            })
+            scores.append(score)
+
+    words.sort(key=lambda w: (w["bbox"][1], w["bbox"][0]))
+    full_text = "\n".join(w["text"] for w in words)
+    mean_conf = (sum(scores) / len(scores) * 100) if scores else 0.0
+    return full_text, mean_conf, words
+
+
+def ocr_paddleocr(img_path: str, lang: str, caps: Caps,
+                  verbose: bool = False) -> tuple[str, float, list[dict]]:
+    """Run PaddleOCR 3.x. Returns (text, mean_conf, words)."""
+    caps.require_paddleocr()
+    from paddleocr import PaddleOCR
+
+    paddle_lang = resolve_paddle_lang(lang)
+    engine = _PADDLE_CACHE.get(paddle_lang)
+    if engine is None:
+        _log(f"loading PaddleOCR reader (lang={paddle_lang})...", verbose)
+        engine = PaddleOCR(use_angle_cls=True, lang=paddle_lang)
+        _PADDLE_CACHE[paddle_lang] = engine
+
+    result = engine.predict(img_path)
+    text, mean_conf, words = _parse_paddle_result(result)
+    _log(f"paddleocr: {len(words)} lines, mean_conf={mean_conf:.1f}", verbose)
+    return text, mean_conf, words
+
+
 def vision_handoff(img_paths: list[tuple[int, str]], verbose: bool = False) -> str:
     """
     Print a manifest of rendered PNG paths for agent-driven vision OCR.
@@ -694,22 +809,36 @@ def vision_handoff(img_paths: list[tuple[int, str]], verbose: bool = False) -> s
     return manifest
 
 
-def vision_api(img_paths: list[tuple[int, str]], verbose: bool = False) -> str:
-    """Call OpenAI GPT-4o vision API for pages (requires OPENAI_API_KEY)."""
-    if not os.environ.get("OPENAI_API_KEY"):
-        _fatal("OPENAI_API_KEY not set. Set the env var or use --engine vision (agent-driven).",
-               EXIT_BAD_ARGS)
+def resolve_vision_config(args: argparse.Namespace) -> tuple[str, str, str | None]:
+    """
+    Resolve (api_key, model, endpoint) for the vision-api engine from CLI flags only.
+    Never reads OPENAI_API_KEY from the environment. Fatal if key or model missing.
+    """
+    key = (getattr(args, "vision_api_key", "") or "").strip()
+    model = (getattr(args, "vision_model", "") or "").strip()
+    endpoint = (getattr(args, "vision_api_url", "") or "").strip() or None
+    if not key:
+        _fatal("--vision-api-key is required for --engine vision-api.", EXIT_BAD_ARGS)
+    if not model:
+        _fatal("--vision-model is required for --engine vision-api.", EXIT_BAD_ARGS)
+    return key, model, endpoint
+
+
+def vision_api(img_paths: list[tuple[int, str]], args: argparse.Namespace,
+               verbose: bool = False) -> str:
+    """Call an OpenAI-compatible vision API for pages using CLI-provided config."""
+    key, model, endpoint = resolve_vision_config(args)
     try:
         from openai import OpenAI
     except ImportError:
         _fatal("openai package not installed. Run: uv run --with openai python3 ocr.py ...",
                EXIT_MISSING_BINARY)
 
-    client = OpenAI()
+    client = OpenAI(api_key=key, base_url=endpoint)
     parts_by_page: list[str] = []
 
     for pnum, png_path in img_paths:
-        _log(f"vision API: page {pnum}", verbose)
+        _log(f"vision API: page {pnum} (model={model})", verbose)
         with open(png_path, "rb") as f:
             b64 = base64.b64encode(f.read()).decode()
         content = [
@@ -721,7 +850,7 @@ def vision_api(img_paths: list[tuple[int, str]], verbose: bool = False) -> str:
                       "describe axis labels and key data values. No commentary.")},
         ]
         resp = client.chat.completions.create(
-            model="gpt-4o",
+            model=model,
             messages=[{"role": "user", "content": content}],
             max_tokens=4096,
         )
@@ -952,7 +1081,7 @@ def process_file(
             rendered = render_pages(path, dpi, page_range, tmpdir, caps, verbose)
         else:
             rendered = [(1, path)]
-        combined_md = vision_api(rendered, verbose)
+        combined_md = vision_api(rendered, args, verbose)
         pages_data.append({"n": 0, "source": "vision_api", "mean_conf": None,
                             "flag": None, "text": combined_md, "words": []})
         cache.set(cache_key, {"pages": pages_data})
@@ -972,6 +1101,35 @@ def process_file(
             pages_data.append({
                 "n": pnum, "source": "easyocr",
                 "mean_conf": conf, "flag": None,
+                "text": cleaned, "words": words,
+            })
+        cache.set(cache_key, {"pages": pages_data})
+        return pages_data
+
+    # PaddleOCR path (opt-in)
+    if args.engine == "paddleocr":
+        if input_type == "pdf":
+            page_range = _parse_page_range(args.pages, probe["pages"]) if args.pages else None
+            rendered = render_pages(path, dpi, page_range, tmpdir, caps, verbose)
+        else:
+            rendered = [(1, path)]
+
+        # Resolve language: OSD auto-detect on page 1, else the user-provided code
+        lang = args.lang
+        if lang == "auto" and rendered:
+            lang = detect_lang(rendered[0][1], caps, verbose)
+            _log(f"language detected: {lang}", verbose)
+
+        for pnum, img_path in rendered:
+            pp_path = preprocess(img_path, pp_level, caps, tmpdir, verbose)
+            text, conf, words = ocr_paddleocr(pp_path, lang, caps, verbose)
+            cleaned = general_cleanup(text) if not args.no_cleanup else text
+            flag = None
+            if conf < args.min_conf or looks_tabular(words):
+                flag = "review-vision"
+            pages_data.append({
+                "n": pnum, "source": "paddleocr",
+                "mean_conf": round(conf, 1), "flag": flag,
                 "text": cleaned, "words": words,
             })
         cache.set(cache_key, {"pages": pages_data})
@@ -1119,7 +1277,7 @@ Examples:
     )
     p.add_argument("inputs", nargs="+", metavar="INPUT", help="PDF or image file(s)")
     p.add_argument("--engine", default="auto",
-                   choices=["auto", "tesseract", "easyocr", "vision", "vision-api"],
+                   choices=["auto", "tesseract", "easyocr", "paddleocr", "vision", "vision-api"],
                    help="OCR engine (default: auto)")
     p.add_argument("--lang", default="auto",
                    help="Tesseract language code(s), e.g. rus+eng (default: auto via OSD)")
@@ -1148,6 +1306,12 @@ Examples:
                    help="Only process files with a real text layer; skip OCR")
     p.add_argument("--no-cleanup", action="store_true",
                    help="Skip whitespace / ligature cleanup of OCR output")
+    p.add_argument("--vision-api-url", default="",
+                   help="OpenAI-compatible base URL for --engine vision-api")
+    p.add_argument("--vision-api-key", default="",
+                   help="API key for --engine vision-api (required; env vars are not read)")
+    p.add_argument("--vision-model", default="",
+                   help="Model name for --engine vision-api (required; no default)")
     p.add_argument("--searchable-pdf", default="",
                    help="Path for searchable PDF output (requires ocrmypdf)")
     p.add_argument("--json-report", default="",

@@ -56,6 +56,9 @@ Work through this in order. Stop at the first successful step.
    │     Renders persistent PNGs and hands them to the current multimodal agent
    │     to read (Claude, GPT, or another model with image/file reading).
    │     Agent produces Markdown (use Markdown table syntax for tables).
+   ├─ CJK / multilingual / angled dense text
+   │   → python3 scripts/ocr.py FILE --engine paddleocr
+   │     (opt-in; installs paddleocr+paddlepaddle, downloads models on first run)
    ├─ handwriting detected (very low conf, cursive)
    │   → python3 scripts/ocr.py FILE --engine easyocr
    └─ skewed/noisy scan (scanned paper, phone photo)
@@ -91,6 +94,14 @@ python3 scripts/ocr.py scan.pdf --preprocess full --format all
 
 # Table-heavy slide / complex layout → vision tier
 python3 scripts/ocr.py slides.pdf --engine vision
+
+# CJK / multilingual doc → PaddleOCR (opt-in)
+uv run --with paddleocr,paddlepaddle python3 scripts/ocr.py doc.png --engine paddleocr
+
+# Headless vision via an OpenAI-compatible endpoint (all config via flags)
+uv run --with openai python3 scripts/ocr.py slides.pdf --engine vision-api \
+  --vision-api-url https://api.example.com/v1 \
+  --vision-api-key "$MY_KEY" --vision-model my-vision-model
 ```
 
 ## Engine tiers (summary)
@@ -100,6 +111,7 @@ python3 scripts/ocr.py slides.pdf --engine vision
 | 0 | pdftotext / PyMuPDF | Real text layers | Free, instant |
 | 1 | tesseract (default) | Clean scans, typed text, 160+ languages | Free, ~3–4s/page |
 | 2 | easyocr | Handwriting, degraded scans | Free, heavy (~2 GB) |
+| 2.5 | paddleocr (opt-in) | CJK, multilingual (100+), angled text | Free, models on first run |
 | 3 | vision (agent reads PNGs) | Tables, charts, complex layouts | Agent/model tokens |
 | 4 | cloud APIs | High-volume, max accuracy | Paid + key |
 
@@ -120,7 +132,7 @@ maps, DPI guidance, preprocessing levels, and install commands.
 
 ```
 python3 scripts/ocr.py INPUT [INPUT ...]
-  --engine   auto|tesseract|easyocr|vision   default: auto
+  --engine   auto|tesseract|easyocr|paddleocr|vision|vision-api   default: auto
   --lang     auto|<tesseract codes>           default: auto (OSD detection)
   --format   md|txt|json|all                 default: md
   --out      PATH                            default: stdout (md/txt) or ./
@@ -132,6 +144,9 @@ python3 scripts/ocr.py INPUT [INPUT ...]
   --min-conf F      (default 60.0 — flag pages below this for review)
   --cache    PATH   --force   --skip-ocr
   --no-cleanup      (skip whitespace / ligature cleanup)
+  --vision-api-url  URL   (OpenAI-compatible base URL for vision-api)
+  --vision-api-key  KEY   (required for vision-api; env vars are NOT read)
+  --vision-model    NAME  (required for vision-api; no default)
   --searchable-pdf OUT.pdf
   --json-report PATH
   --verbose

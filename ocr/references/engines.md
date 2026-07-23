@@ -8,8 +8,9 @@
 | 1 | tesseract (default) | Clean rasterized text, typed docs | 160+ incl. rus, eng, chi_sim | ~3–4 s/page @ 300 DPI | Free | tesseract binary (present) |
 | 2 | pytesseract wrapper | Same as tesseract; adds TSV confidence | Same | Same | Free | `uv run --with pytesseract` |
 | 3 | easyocr | Handwriting, degraded/blurry scans | ru, en (and many others) | ~8–20 s/page (CPU) | Free | `uv run --with easyocr` + 2 GB models |
+| 3.5 | paddleocr (opt-in) | CJK, multilingual, angled/rotated text | 100+ incl. ch, japan, korean, ru, en | ~2–10 s/page (CPU) | Free | `uv run --with paddleocr,paddlepaddle` + models on first run |
 | 4 | Vision (agent reads PNGs) | Tables, charts, forms, complex layouts | Any | Agent latency | Agent tokens | None — agent-native |
-| 5 | Vision API (OpenAI / Anthropic) | Headless batch, tables, complex layouts | Any | Fast | API cost | Key + `uv run --with openai` |
+| 5 | Vision API (OpenAI-compatible) | Headless batch, tables, complex layouts | Any | Fast | API cost | Key + model + `uv run --with openai` |
 | 6 | Cloud APIs | High-volume, regulated, max accuracy | Any | Fast | Paid | Key + SDK |
 
 Measured baseline on clean rasterized Russian financial doc:
@@ -146,6 +147,51 @@ uv pip install opencv-python numpy
 
 ---
 
+## PaddleOCR tier (opt-in)
+
+PaddleOCR is a strong multilingual engine (100+ languages) that excels at CJK
+scripts (Chinese/Japanese/Korean), dense layouts, and angled/rotated text via
+its built-in angle classifier. It is **opt-in only** — `--engine auto` never
+selects it. Reach for it when tesseract struggles on CJK or mixed-script pages.
+
+```bash
+uv run --with paddleocr,paddlepaddle python3 scripts/ocr.py doc.png --engine paddleocr
+# First run downloads detection/recognition/angle models (cached afterward).
+```
+
+### API note (PaddleOCR 3.x only)
+
+The engine targets the PaddleOCR **3.x** API: `PaddleOCR(...).predict(path)`,
+which returns result items exposing `rec_texts`, `rec_scores`, and `rec_polys`.
+It does **not** support the 2.x `.ocr()` list-of-lists format. The reader is
+constructed once per language and reused across pages.
+
+### Language codes
+
+`--lang` accepts tesseract codes (`auto` via OSD, or e.g. `rus+eng`). The
+primary code is mapped to a PaddleOCR code internally:
+
+| Tesseract | PaddleOCR | | Tesseract | PaddleOCR |
+|-----------|-----------|-|-----------|-----------|
+| eng | en | | jpn | japan |
+| rus | ru | | kor | korean |
+| chi_sim | ch | | ara | arabic |
+| chi_tra | chinese_cht | | hin | hi |
+
+Composite specs like `rus+eng` use the primary code (`ru`); unknown codes fall
+back to `en`.
+
+### When to prefer PaddleOCR
+
+- CJK documents (Chinese/Japanese/Korean) — usually beats tesseract
+- Mixed-script or non-Latin pages where OSD is unreliable
+- Pages with rotated/angled text lines (angle classifier handles them)
+
+Prefer tesseract for clean Latin/Cyrillic typed docs (faster, zero install) and
+easyocr for handwriting.
+
+---
+
 ## Vision tier — agent-driven
 
 When `--engine vision` is used (or when flagged pages trigger escalation),
@@ -169,11 +215,21 @@ Do not add commentary or interpretation — only the content visible in the imag
 
 ### Vision API path (headless / batch use)
 
-When `OPENAI_API_KEY` is set and `--engine vision-api` is passed, `ocr.py` sends
-pages to GPT-4o with `detail: high`. Requires:
+`--engine vision-api` sends rendered pages to any **OpenAI-compatible** vision
+endpoint with `detail: high`. All configuration is passed via flags — the key is
+**never** read from `OPENAI_API_KEY` (or any environment variable), and there is
+**no default model**. Both `--vision-api-key` and `--vision-model` are required;
+`--vision-api-url` is optional (defaults to the OpenAI base URL).
+
 ```bash
-export OPENAI_API_KEY=sk-…
-uv run --with openai python3 scripts/ocr.py FILE --engine vision-api
+# OpenAI
+uv run --with openai python3 scripts/ocr.py FILE --engine vision-api \
+  --vision-api-key "$OPENAI_KEY" --vision-model gpt-4o
+
+# Any OpenAI-compatible gateway / self-hosted model
+uv run --with openai python3 scripts/ocr.py FILE --engine vision-api \
+  --vision-api-url https://gateway.example.com/v1 \
+  --vision-api-key "$GATEWAY_KEY" --vision-model qwen2-vl
 ```
 
 ---
@@ -255,6 +311,10 @@ uv run --with opencv-python,numpy python3 scripts/ocr.py FILE --preprocess enhan
 uv run --with easyocr python3 scripts/ocr.py FILE --engine easyocr
 # Note: first run downloads ~2 GB of models
 
+# PaddleOCR engine (CJK / multilingual, opt-in)
+uv run --with paddleocr,paddlepaddle python3 scripts/ocr.py FILE --engine paddleocr
+# Note: first run downloads OCR models; PaddleOCR 3.x API only
+
 # Tier 1 renderer upgrade: PyMuPDF
 uv run --with pymupdf python3 scripts/ocr.py FILE
 # Note: PyMuPDF is AGPL licensed
@@ -262,9 +322,9 @@ uv run --with pymupdf python3 scripts/ocr.py FILE
 # Searchable PDF output
 brew install ocrmypdf
 
-# Vision API
-export OPENAI_API_KEY=sk-…
-uv run --with openai python3 scripts/ocr.py FILE --engine vision-api
+# Vision API (OpenAI-compatible; key + model required, endpoint optional)
+uv run --with openai python3 scripts/ocr.py FILE --engine vision-api \
+  --vision-api-key KEY --vision-model MODEL [--vision-api-url URL]
 
 # All optional Python tiers at once
 uv run --with pytesseract,pymupdf,opencv-python,numpy python3 scripts/ocr.py FILE

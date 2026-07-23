@@ -47,7 +47,7 @@ class RecognitionError(RuntimeError):
 
 @dataclass(frozen=True)
 class Config:
-    source: Path
+    sources: tuple[Path, ...]
     target: Path
     cache: Path
     engine: str
@@ -96,8 +96,9 @@ def is_within(path: Path, root: Path) -> bool:
         return False
 
 
-def validate_roots(source: Path, target: Path, cache: Path) -> None:
-    roots = (("source", source), ("target", target), ("cache", cache))
+def validate_roots(sources: Iterable[Path], target: Path, cache: Path) -> None:
+    roots = [(f"source[{i}]", src) for i, src in enumerate(sources)]
+    roots += [("target", target), ("cache", cache)]
     for index, (left_name, left) in enumerate(roots):
         for right_name, right in roots[index + 1 :]:
             if left == right or is_within(left, right) or is_within(right, left):
@@ -105,6 +106,30 @@ def validate_roots(source: Path, target: Path, cache: Path) -> None:
                     f"{left_name} and {right_name} must be separate, non-nested paths: "
                     f"{left} / {right}"
                 )
+
+
+def parse_source_dirs(value: str) -> tuple[Path, ...]:
+    parts = [part.strip() for part in value.split(":")]
+    parts = [part for part in parts if part]
+    if not parts:
+        raise RecognitionError("AGENT_HEALTH_SOURCE_DIR is empty")
+    paths: list[Path] = []
+    seen: set[Path] = set()
+    for part in parts:
+        path = expanded_path(part)
+        if not path.is_dir():
+            raise RecognitionError(f"Source directory does not exist: {path}")
+        if path in seen:
+            raise RecognitionError(f"Duplicate source directory: {path}")
+        seen.add(path)
+        paths.append(path)
+    if len(paths) > 1:
+        names = [path.name for path in paths]
+        if len(set(names)) != len(names):
+            raise RecognitionError(
+                "Source directories must have unique names when multiple are given"
+            )
+    return tuple(paths)
 
 
 def required_env(name: str) -> str:
@@ -119,12 +144,10 @@ def default_ocr_script() -> Path:
 
 
 def load_config() -> Config:
-    source = expanded_path(required_env("AGENT_HEALTH_SOURCE_DIR"))
+    sources = parse_source_dirs(required_env("AGENT_HEALTH_SOURCE_DIR"))
     target = expanded_path(required_env("AGENT_HEALTH_TARGET_DIR"))
     cache = expanded_path(required_env("AGENT_HEALTH_CACHE_DIR"))
-    if not source.is_dir():
-        raise RecognitionError(f"Source directory does not exist: {source}")
-    validate_roots(source, target, cache)
+    validate_roots(sources, target, cache)
 
     engine = required_env("AGENT_HEALTH_ENGINE")
 
@@ -157,7 +180,7 @@ def load_config() -> Config:
         "script_version": VERSION,
     }
     return Config(
-        source=source,
+        sources=sources,
         target=target,
         cache=cache,
         engine=engine,
@@ -189,7 +212,7 @@ def atomic_write(path: Path, content: str | bytes, roots: Iterable[Path]) -> boo
     return True
 
 
-def scan_source(source: Path) -> list[SourceDocument]:
+def scan_source(source: Path, prefix: str = "") -> list[SourceDocument]:
     documents: list[SourceDocument] = []
     for path in sorted(source.rglob("*"), key=lambda item: item.as_posix().casefold()):
         if not path.is_file() or path.name.startswith(".") or path.name.startswith("~$"):
@@ -200,12 +223,23 @@ def scan_source(source: Path) -> list[SourceDocument]:
         documents.append(
             SourceDocument(
                 path=path,
-                relative=path.relative_to(source).as_posix(),
+                relative=prefix + path.relative_to(source).as_posix(),
                 sha256=sha256_file(path),
                 size=stat.st_size,
                 mtime_ns=stat.st_mtime_ns,
             )
         )
+    return documents
+
+
+def scan_sources(sources: Iterable[Path]) -> list[SourceDocument]:
+    sources = tuple(sources)
+    multi = len(sources) > 1
+    documents: list[SourceDocument] = []
+    for source in sources:
+        prefix = f"{source.name}/" if multi else ""
+        documents.extend(scan_source(source, prefix))
+    documents.sort(key=lambda doc: doc.relative.casefold())
     return documents
 
 
@@ -564,7 +598,7 @@ def process(config: Config, check: bool) -> int:
         config.target.mkdir(parents=True, exist_ok=True)
         config.cache.mkdir(parents=True, exist_ok=True)
     people = load_family(config.target)
-    before_documents = scan_source(config.source)
+    before_documents = scan_sources(config.sources)
     before_manifest = source_manifest(before_documents)
     results: list[dict[str, Any]] = []
     mismatches: list[str] = []
@@ -625,7 +659,7 @@ def process(config: Config, check: bool) -> int:
     else:
         atomic_write(index_path, index_content, [config.target])
 
-    after_manifest = source_manifest(scan_source(config.source))
+    after_manifest = source_manifest(scan_sources(config.sources))
     if before_manifest != after_manifest:
         raise RecognitionError("Source manifest changed during processing")
 
@@ -641,6 +675,13 @@ def process(config: Config, check: bool) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Recognize external family medical documents into Markdown via the ocr skill"
+    )
+    parser.add_argument(
+        "command",
+        nargs="?",
+        default="index",
+        choices=["index"],
+        help="Command to run (default: index — recognize documents and rebuild the index)",
     )
     parser.add_argument("--check", action="store_true", help="Verify cache and outputs without writes")
     args = parser.parse_args(argv)

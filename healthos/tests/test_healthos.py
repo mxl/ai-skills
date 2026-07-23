@@ -228,7 +228,7 @@ def test_ambiguous_source_roots_are_unassigned(tmp_path):
 def test_rejects_nested_roots():
     source = Path("/tmp/source")
     with pytest.raises(MODULE.RecognitionError):
-        MODULE.validate_roots(source, source / "target", Path("/tmp/cache"))
+        MODULE.validate_roots([source], source / "target", Path("/tmp/cache"))
 
 
 def test_yaml_scalar_sanitizes_control_chars():
@@ -241,3 +241,63 @@ def test_yaml_scalar_sanitizes_control_chars():
 def test_strip_leading_h1():
     assert MODULE.strip_leading_h1("# Title\n\nbody") == "body"
     assert MODULE.strip_leading_h1("no heading\n\nmore") == "no heading\n\nmore"
+
+
+def test_index_command_matches_default(workspace):
+    source, target, _, _ = workspace
+    (source / "child-scan.png").write_bytes(PNG_1X1)
+    assert MODULE.main(["index"]) == 0
+    assert (target / "recognition-index.md").is_file()
+    assert (target / "people" / "child" / "unknown" / "child-scan.md").is_file()
+
+
+def test_parse_source_dirs_splits_on_colon(tmp_path):
+    first = tmp_path / "a"
+    second = tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+    assert MODULE.parse_source_dirs(f"{first}:{second}") == (
+        first.resolve(),
+        second.resolve(),
+    )
+
+
+def test_parse_source_dirs_rejects_duplicate_names(tmp_path):
+    first = tmp_path / "a" / "docs"
+    second = tmp_path / "b" / "docs"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    with pytest.raises(MODULE.RecognitionError, match="unique names"):
+        MODULE.parse_source_dirs(f"{first}:{second}")
+
+
+def test_multiple_source_dirs_route_by_basename(tmp_path, monkeypatch):
+    src_child = tmp_path / "child"
+    src_adult = tmp_path / "adult"
+    target = tmp_path / "target"
+    cache = tmp_path / "cache"
+    for directory in (src_child, src_adult, target):
+        directory.mkdir()
+    ocr_script = tmp_path / "fake_ocr.py"
+    ocr_script.write_text(FAKE_OCR, encoding="utf-8")
+    write_family(target)
+    # Neutral filenames so routing relies on the source-dir basename prefix,
+    # which maps to each person's configured source_root.
+    (src_child / "report.png").write_bytes(PNG_1X1)
+    (src_adult / "report.png").write_bytes(PNG_1X1)
+
+    env = {
+        "AGENT_HEALTH_SOURCE_DIR": f"{src_child}:{src_adult}",
+        "AGENT_HEALTH_TARGET_DIR": str(target),
+        "AGENT_HEALTH_CACHE_DIR": str(cache),
+        "AGENT_HEALTH_ENGINE": "tesseract",
+        "AGENT_HEALTH_OCR_SCRIPT": str(ocr_script),
+        "AGENT_HEALTH_TIMEOUT_SECONDS": "30",
+    }
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    assert MODULE.main(["index"]) == 0
+    assert (target / "people" / "child" / "unknown" / "report.md").is_file()
+    assert (target / "people" / "adult" / "unknown" / "report.md").is_file()
+    assert MODULE.main(["index", "--check"]) == 0

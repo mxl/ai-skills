@@ -242,6 +242,21 @@ def test_run_ocr_wraps_ocr_module_errors(workspace, monkeypatch):
         MODULE.run_ocr(config, document)
 
 
+def test_main_stops_and_reports_stderr_on_recognition_error(workspace, monkeypatch, capsys):
+    source, target, _, _ = workspace
+    (source / "child.png").write_bytes(PNG_1X1)
+    failing_script = source.parent / "failing_ocr.py"
+    failing_script.write_text(FAILING_OCR, encoding="utf-8")
+    monkeypatch.setenv("AGENT_HEALTH_OCR_SCRIPT", str(failing_script))
+
+    assert MODULE.main([]) == 1
+
+    captured = capsys.readouterr()
+    assert "Error: child.png: ocr recognition failed: boom" in captured.err
+    assert not (target / "_unassigned").exists()
+    assert not (target / "recognition-index.md").exists()
+
+
 def test_ocr_timeout_is_optional_and_defaults(workspace, monkeypatch):
     monkeypatch.delenv("AGENT_HEALTH_OCR_TIMEOUT_SECONDS", raising=False)
     assert MODULE.load_config().timeout == 600

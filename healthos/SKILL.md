@@ -45,7 +45,8 @@ Routing rules:
    below). If any are missing, stop and report exactly which — never invent
    paths, tokens, or model names.
 3. After the run, summarize `recognition-index.md`, calling out `_unassigned`
-   and failed documents. Do not interpret or diagnose medical content.
+   documents. Do not interpret or diagnose medical content. If the run
+   stopped on a recognition error, report the stderr message verbatim.
 
 `index` is the only command today; treat an unknown command as a user typo and
 ask before running.
@@ -163,8 +164,9 @@ wins and routes the document to `_unassigned`.
 
 - Missing or invalid environment: stop before processing.
 - Changed source during processing: fail after reporting source-manifest drift.
-- `ocr.recognize()` failure (`OcrError` or otherwise) or empty output: save a
-  failed record under `_unassigned`.
+- `ocr.recognize()` failure (`OcrError` or otherwise) or empty output: print
+  the error to stderr and stop immediately — no partial index or
+  `_unassigned` record is written for that run.
 - Ambiguous identity: save recognized Markdown under `_unassigned`.
 - Cache hit: do not re-run `ocr.recognize()`.
 - Unknown medical content: transcribe it; do not interpret it.

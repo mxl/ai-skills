@@ -635,13 +635,8 @@ def process(config: Config, check: bool) -> int:
             if check:
                 mismatches.append(f"{document.relative}: {exc}")
                 continue
-            markdown = f"[Recognition error: {exc}]"
-            cache_hit = False
-            recognized_at = dt.datetime.now(dt.timezone.utc).date().isoformat()
-            issues = [str(exc)]
-            person_id = None
-            assignment_reason = "recognition_failed"
-            status = "failed"
+            print(f"Error: {document.relative}: {exc}", file=sys.stderr)
+            return 1
 
         year = infer_year(document.relative)
         output_path = output_path_for(

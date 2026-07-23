@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Recognize external family medical documents into tracked Markdown.
 
-Recognition itself is delegated to the `ocr` skill's `ocr.py` script. This
-module owns only the deterministic wrapper: scanning the read-only source tree,
-caching recognized Markdown, routing each document to a family member, and
-writing tracked Markdown under the target directory.
+Recognition itself is delegated to the `ocr` skill's `ocr.py`, imported and
+called as a library (not spawned as a subprocess). This module owns only the
+deterministic wrapper: scanning the read-only source tree, caching recognized
+Markdown, routing each document to a family member, and writing tracked
+Markdown under the target directory.
 """
 
 from __future__ import annotations
@@ -12,21 +13,21 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import hashlib
+import importlib.util
 import json
 import os
 import re
-import subprocess
 import sys
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Iterable
 
 import yaml
 
 
-VERSION = "0.2.0"
-OCR_FORMAT = "md"
+VERSION = "0.3.0"
 SUPPORTED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 VISION_ENGINE = "vision-api"
 BANNED_OPENERS = (
@@ -192,7 +193,6 @@ def load_config() -> Config:
         "vision_api_url": vision_api_url,
         "vision_model": vision_model,
         "ocr_script": ocr_script.name,
-        "ocr_format": OCR_FORMAT,
         "script_version": VERSION,
     }
     return Config(
@@ -270,45 +270,51 @@ def source_manifest(documents: list[SourceDocument]) -> dict[str, dict[str, Any]
     }
 
 
-def build_ocr_command(config: Config, document: SourceDocument) -> list[str]:
-    command = [
-        sys.executable,
-        str(config.ocr_script),
-        str(document.path),
-        "--engine",
-        config.engine,
-        "--format",
-        OCR_FORMAT,
-    ]
-    if config.engine == VISION_ENGINE:
-        command += [
-            "--vision-api-url",
-            config.vision_api_url or "",
-            "--vision-api-key",
-            config.vision_api_key or "",
-            "--vision-model",
-            config.vision_model or "",
-        ]
-    return command
+_OCR_MODULES: dict[Path, ModuleType] = {}
+
+
+def load_ocr_module(script_path: Path) -> ModuleType:
+    """Import ocr.py as a library module, cached by resolved path.
+
+    ocr.py has no package structure, so it is loaded directly from its file
+    path via importlib instead of a normal `import` statement.
+    """
+    resolved = script_path.resolve()
+    module = _OCR_MODULES.get(resolved)
+    if module is not None:
+        return module
+    spec = importlib.util.spec_from_file_location(f"healthos_ocr_{resolved.stem}", resolved)
+    if spec is None or spec.loader is None:
+        raise RecognitionError(f"Could not load ocr module from: {resolved}")
+    module = importlib.util.module_from_spec(spec)
+    # Register before exec_module(): dataclasses on Python 3.14 resolve their
+    # own module via sys.modules[cls.__module__] during class creation, which
+    # crashes with AttributeError on None if the module isn't registered yet.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    _OCR_MODULES[resolved] = module
+    return module
 
 
 def run_ocr(config: Config, document: SourceDocument) -> str:
-    command = build_ocr_command(config, document)
+    ocr_module = load_ocr_module(config.ocr_script)
+    options = ocr_module.RecognizeOptions(
+        engine=config.engine,
+        vision_api_url=config.vision_api_url or "",
+        vision_api_key=config.vision_api_key or "",
+        vision_model=config.vision_model or "",
+        # Bounds the vision-api HTTP request via the openai SDK's own client
+        # timeout. Local engines run in-process with no external kill switch
+        # now that recognition is a library call rather than a subprocess.
+        timeout=float(config.timeout),
+    )
     try:
-        result = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=config.timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RecognitionError(f"ocr.py timed out after {config.timeout}s") from exc
-    if result.returncode != 0:
-        stderr = (result.stderr or "").strip()
-        raise RecognitionError(f"ocr.py exited {result.returncode}: {stderr[:500]}")
-    markdown = result.stdout
+        pages = ocr_module.recognize(document.path, options)
+    except Exception as exc:
+        raise RecognitionError(f"ocr recognition failed: {exc}") from exc
+    markdown = ocr_module.to_markdown(pages, document.path.name)
     if not markdown.strip():
-        raise RecognitionError("ocr.py produced empty output")
+        raise RecognitionError("ocr recognition produced empty output")
     return markdown
 
 

@@ -152,6 +152,47 @@ python3 scripts/ocr.py INPUT [INPUT ...]
   --verbose
 ```
 
+## Library usage
+
+`ocr.py` also works as an importable library for other skills/scripts that
+want structured OCR results in-process instead of shelling out to the CLI.
+Since it has no package structure, load it via `importlib` (or add its
+directory to `sys.path`) rather than a normal `import ocr` from elsewhere:
+
+```python
+import importlib.util
+
+spec = importlib.util.spec_from_file_location("ocr", "/path/to/ocr/scripts/ocr.py")
+ocr = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ocr)
+
+pages = ocr.recognize("scan.pdf", ocr.RecognizeOptions(engine="tesseract", lang="rus+eng"))
+markdown = ocr.to_markdown(pages, "scan.pdf")
+```
+
+- `recognize(path, options=None, *, caps=None, cache=None)` is the entry
+  point: it manages a throwaway render directory and returns the same
+  per-page dicts the CLI builds internally. Format the result with
+  `to_markdown()`, `to_text()`, or `to_json()`.
+- `RecognizeOptions` mirrors the CLI's recognition flags (`engine`, `lang`,
+  `dpi`, `preprocess`, `pages`, `max_pages`, `psm`, `min_conf`, `no_cleanup`,
+  `force`, `vision_api_url`, `vision_api_key`, `vision_model`, `timeout`,
+  `verbose`). Output-only flags (`--out`, `--format`, `--json-report`,
+  `--searchable-pdf`) are CLI-only and have no library equivalent.
+- `--engine vision` is an interactive agent handoff (renders pages and prints
+  a manifest for a multimodal agent to read) and is not usable via
+  `recognize()`; it raises `OcrError` if requested. Use another engine or the
+  CLI directly.
+- Catch `OcrError` for recoverable failures (unsupported input, missing
+  binaries/packages, vision-api config/request errors) — the library never
+  calls `sys.exit()`, unlike the CLI.
+- For `engine="vision-api"`, `RecognizeOptions.timeout` (seconds) bounds the
+  HTTP request via the openai SDK's own client timeout. Local engines
+  (tesseract/easyocr/paddleocr) run in-process with no external kill switch,
+  since there is no longer a subprocess to terminate on timeout.
+- The `healthos` skill uses this API to recognize family medical documents
+  without spawning a subprocess per file.
+
 ## Troubleshooting
 
 See `references/troubleshooting.md` for: rasterized-text PDFs, garbled Cyrillic,

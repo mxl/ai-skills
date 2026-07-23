@@ -6,8 +6,15 @@ Baseline: Python stdlib + pdftoppm + pdftotext + tesseract (all assumed present)
 Optional tiers: pytesseract, PyMuPDF, opencv-python, numpy, easyocr, openai.
 Install optional tiers on-demand: uv run --with <package> python3 ocr.py ...
 
-Usage:  python3 ocr.py INPUT [INPUT ...] [options]
-See SKILL.md or --help for full flag reference.
+CLI usage:      python3 ocr.py INPUT [INPUT ...] [options]
+                See SKILL.md or --help for full flag reference.
+
+Library usage:  import ocr  (load via importlib if calling from outside this
+                directory, since this module has no package structure)
+                pages = ocr.recognize("scan.pdf", ocr.RecognizeOptions(engine="tesseract"))
+                markdown = ocr.to_markdown(pages, "scan.pdf")
+                Catch `ocr.OcrError` for recoverable failures (missing
+                binaries/packages, unsupported input, vision-api config).
 """
 
 from __future__ import annotations
@@ -24,14 +31,29 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 # ── exit codes ────────────────────────────────────────────────────────────────
 EXIT_OK = 0
 EXIT_BAD_ARGS = 2
 EXIT_UNSUPPORTED = 3
 EXIT_MISSING_BINARY = 4
+
+
+class OcrError(Exception):
+    """Recoverable OCR failure: bad input, missing binaries/packages, or a
+    vision-api configuration/request error.
+
+    CLI: `main()` catches this at the top level, prints `[ocr] ERROR: ...` to
+    stderr, and exits with `.code`.
+    Library: catch `OcrError` directly — it never calls `sys.exit()`.
+    """
+
+    def __init__(self, message: str, code: int = EXIT_BAD_ARGS) -> None:
+        super().__init__(message)
+        self.code = code
 
 # ── constants ─────────────────────────────────────────────────────────────────
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".tiff", ".tif", ".heic", ".webp", ".bmp", ".gif"}
@@ -154,9 +176,15 @@ class Caps:
 
 # ── utilities ─────────────────────────────────────────────────────────────────
 
-def _fatal(msg: str, code: int = EXIT_BAD_ARGS) -> None:
-    print(f"[ocr] ERROR: {msg}", file=sys.stderr)
-    sys.exit(code)
+def _fatal(msg: str, code: int = EXIT_BAD_ARGS) -> NoReturn:
+    """Raise OcrError(msg, code).
+
+    This used to call sys.exit() directly, which made ocr.py unsafe to import
+    as a library (any failure anywhere would kill the whole host process).
+    The CLI entry point now converts OcrError to the equivalent stderr
+    message + exit code at the top level; library callers catch it normally.
+    """
+    raise OcrError(msg, code)
 
 
 def _log(msg: str, verbose: bool) -> None:
@@ -809,32 +837,54 @@ def vision_handoff(img_paths: list[tuple[int, str]], verbose: bool = False) -> s
     return manifest
 
 
-def resolve_vision_config(args: argparse.Namespace) -> tuple[str, str, str | None]:
+def resolve_vision_config(
+    vision_api_key: str = "",
+    vision_model: str = "",
+    vision_api_url: str = "",
+) -> tuple[str, str, str | None]:
     """
-    Resolve (api_key, model, endpoint) for the vision-api engine from CLI flags only.
-    Never reads OPENAI_API_KEY from the environment. Fatal if key or model missing.
+    Validate and normalize vision-api credentials passed explicitly by the
+    caller (CLI flags or a library's RecognizeOptions). Never reads
+    OPENAI_API_KEY or any other environment variable. Raises OcrError if key
+    or model is empty.
     """
-    key = (getattr(args, "vision_api_key", "") or "").strip()
-    model = (getattr(args, "vision_model", "") or "").strip()
-    endpoint = (getattr(args, "vision_api_url", "") or "").strip() or None
+    key = (vision_api_key or "").strip()
+    model = (vision_model or "").strip()
+    endpoint = (vision_api_url or "").strip() or None
     if not key:
-        _fatal("--vision-api-key is required for --engine vision-api.", EXIT_BAD_ARGS)
+        _fatal("vision_api_key is required for engine=vision-api (CLI: --vision-api-key).", EXIT_BAD_ARGS)
     if not model:
-        _fatal("--vision-model is required for --engine vision-api.", EXIT_BAD_ARGS)
+        _fatal("vision_model is required for engine=vision-api (CLI: --vision-model).", EXIT_BAD_ARGS)
     return key, model, endpoint
 
 
-def vision_api(img_paths: list[tuple[int, str]], args: argparse.Namespace,
-               verbose: bool = False) -> str:
-    """Call an OpenAI-compatible vision API for pages using CLI-provided config."""
-    key, model, endpoint = resolve_vision_config(args)
+def vision_api(
+    img_paths: list[tuple[int, str]],
+    *,
+    vision_api_url: str = "",
+    vision_api_key: str = "",
+    vision_model: str = "",
+    timeout: float | None = None,
+    verbose: bool = False,
+) -> str:
+    """Call an OpenAI-compatible vision API for pages using explicit config.
+
+    `timeout` (seconds) bounds each request via the openai SDK's own client
+    timeout, so a stalled request is actually cancelled — unlike a generic
+    in-process wall-clock timeout, which cannot forcibly stop a call already
+    running. `None` keeps the SDK's own default.
+    """
+    key, model, endpoint = resolve_vision_config(vision_api_key, vision_model, vision_api_url)
     try:
         from openai import OpenAI
     except ImportError:
         _fatal("openai package not installed. Run: uv run --with openai python3 ocr.py ...",
                EXIT_MISSING_BINARY)
 
-    client = OpenAI(api_key=key, base_url=endpoint)
+    client_kwargs: dict[str, Any] = {"api_key": key, "base_url": endpoint}
+    if timeout is not None:
+        client_kwargs["timeout"] = timeout
+    client = OpenAI(**client_kwargs)
     parts_by_page: list[str] = []
 
     for pnum, png_path in img_paths:
@@ -987,9 +1037,41 @@ class Cache:
 
 # ── main processing ───────────────────────────────────────────────────────────
 
+@dataclass
+class RecognizeOptions:
+    """Recognition parameters for `process_file()`/`recognize()`.
+
+    Mirrors the CLI flags that control *how* a single file is recognized.
+    Output-formatting flags (--out, --format, --json-report, --searchable-pdf)
+    are a CLI/output concern handled by `write_outputs()`, not part of this
+    library-facing options object.
+    """
+    engine: str = "auto"
+    lang: str = "auto"
+    dpi: int = 0
+    preprocess: str = "auto"
+    pages: str = ""
+    max_pages: int = 0
+    psm: int = DEFAULT_PSM
+    min_conf: float = DEFAULT_MIN_CONF
+    no_cleanup: bool = False
+    force: bool = False
+    vision_api_url: str = ""
+    vision_api_key: str = ""
+    vision_model: str = ""
+    # Seconds for the vision-api HTTP request (openai SDK client timeout).
+    # None keeps the SDK default. Not used by local engines (tesseract,
+    # easyocr, paddleocr): once ocr.py is called as a library rather than run
+    # as a CLI subprocess, there is no external process to kill, and a
+    # generic in-process wall-clock timeout cannot forcibly cancel a running
+    # local OCR call — only a real network request can be cancelled cleanly.
+    timeout: float | None = None
+    verbose: bool = False
+
+
 def process_file(
     path: str,
-    args: argparse.Namespace,
+    options: RecognizeOptions,
     caps: Caps,
     cache: Cache,
     tmpdir: str,
@@ -997,14 +1079,14 @@ def process_file(
     """
     Process one input file. Returns list of page dicts.
     """
-    verbose = args.verbose
+    verbose = options.verbose
     input_type = classify_input(path)
 
     if input_type == "unsupported":
         _fatal(f"Unsupported file type: {path}", EXIT_UNSUPPORTED)
 
     # Resolve DPI
-    dpi = args.dpi
+    dpi = options.dpi
     if dpi == 0:  # 0 = auto
         if input_type == "pdf":
             dpi = auto_dpi(path, caps)
@@ -1018,11 +1100,11 @@ def process_file(
         _log(f"probe: {probe['reason']}", verbose)
 
     # Preprocess level
-    pp_level = resolve_preprocess(args.preprocess, probe, caps, input_type)
+    pp_level = resolve_preprocess(options.preprocess, probe, caps, input_type)
 
     # Cache key
-    cache_key = _sha1_key(path, args.engine, str(dpi), pp_level, args.lang)
-    if not args.force and cache.get(cache_key):
+    cache_key = _sha1_key(path, options.engine, str(dpi), pp_level, options.lang)
+    if not options.force and cache.get(cache_key):
         _log(f"cache hit for {path}", verbose)
         cached = cache.get(cache_key)
         return cached.get("pages", [])
@@ -1033,13 +1115,13 @@ def process_file(
     if (input_type == "pdf"
             and probe
             and not probe["needs_ocr"]
-            and not args.force
-            and args.engine == "auto"):
-        page_range = _parse_page_range(args.pages, probe["pages"]) if args.pages else None
+            and not options.force
+            and options.engine == "auto"):
+        page_range = _parse_page_range(options.pages, probe["pages"]) if options.pages else None
         texts = extract_text_layer(path, page_range, caps)
         for i, text in enumerate(texts):
             pnum = (page_range[i] if page_range else i + 1)
-            cleaned = general_cleanup(text) if not args.no_cleanup else text
+            cleaned = general_cleanup(text) if not options.no_cleanup else text
             pages_data.append({
                 "n": pnum,
                 "source": "text_layer",
@@ -1052,9 +1134,9 @@ def process_file(
         return pages_data
 
     # Vision-handoff path
-    if args.engine == "vision":
+    if options.engine == "vision":
         caps.require_render()
-        page_range = _parse_page_range(args.pages, probe["pages"] if probe else 1) if args.pages else None
+        page_range = _parse_page_range(options.pages, probe["pages"] if probe else 1) if options.pages else None
         if input_type == "pdf":
             rendered = render_pages(path, dpi, page_range, tmpdir, caps, verbose)
         else:
@@ -1074,30 +1156,37 @@ def process_file(
         return pages_data
 
     # Vision API path
-    if args.engine == "vision-api":
+    if options.engine == "vision-api":
         caps.require_render()
-        page_range = _parse_page_range(args.pages, probe["pages"] if probe else 1) if args.pages else None
+        page_range = _parse_page_range(options.pages, probe["pages"] if probe else 1) if options.pages else None
         if input_type == "pdf":
             rendered = render_pages(path, dpi, page_range, tmpdir, caps, verbose)
         else:
             rendered = [(1, path)]
-        combined_md = vision_api(rendered, args, verbose)
+        combined_md = vision_api(
+            rendered,
+            vision_api_url=options.vision_api_url,
+            vision_api_key=options.vision_api_key,
+            vision_model=options.vision_model,
+            timeout=options.timeout,
+            verbose=verbose,
+        )
         pages_data.append({"n": 0, "source": "vision_api", "mean_conf": None,
                             "flag": None, "text": combined_md, "words": []})
         cache.set(cache_key, {"pages": pages_data})
         return pages_data
 
     # EasyOCR path
-    if args.engine == "easyocr":
+    if options.engine == "easyocr":
         if input_type == "pdf":
-            page_range = _parse_page_range(args.pages, probe["pages"]) if args.pages else None
+            page_range = _parse_page_range(options.pages, probe["pages"]) if options.pages else None
             rendered = render_pages(path, dpi, page_range, tmpdir, caps, verbose)
         else:
             rendered = [(1, path)]
         for pnum, img_path in rendered:
             pp_path = preprocess(img_path, pp_level, caps, tmpdir, verbose)
             text, conf, words = ocr_easyocr(pp_path, caps, verbose)
-            cleaned = general_cleanup(text) if not args.no_cleanup else text
+            cleaned = general_cleanup(text) if not options.no_cleanup else text
             pages_data.append({
                 "n": pnum, "source": "easyocr",
                 "mean_conf": conf, "flag": None,
@@ -1107,15 +1196,15 @@ def process_file(
         return pages_data
 
     # PaddleOCR path (opt-in)
-    if args.engine == "paddleocr":
+    if options.engine == "paddleocr":
         if input_type == "pdf":
-            page_range = _parse_page_range(args.pages, probe["pages"]) if args.pages else None
+            page_range = _parse_page_range(options.pages, probe["pages"]) if options.pages else None
             rendered = render_pages(path, dpi, page_range, tmpdir, caps, verbose)
         else:
             rendered = [(1, path)]
 
         # Resolve language: OSD auto-detect on page 1, else the user-provided code
-        lang = args.lang
+        lang = options.lang
         if lang == "auto" and rendered:
             lang = detect_lang(rendered[0][1], caps, verbose)
             _log(f"language detected: {lang}", verbose)
@@ -1123,9 +1212,9 @@ def process_file(
         for pnum, img_path in rendered:
             pp_path = preprocess(img_path, pp_level, caps, tmpdir, verbose)
             text, conf, words = ocr_paddleocr(pp_path, lang, caps, verbose)
-            cleaned = general_cleanup(text) if not args.no_cleanup else text
+            cleaned = general_cleanup(text) if not options.no_cleanup else text
             flag = None
-            if conf < args.min_conf or looks_tabular(words):
+            if conf < options.min_conf or looks_tabular(words):
                 flag = "review-vision"
             pages_data.append({
                 "n": pnum, "source": "paddleocr",
@@ -1137,18 +1226,18 @@ def process_file(
 
     # Default: tesseract (auto or explicit)
     if input_type == "pdf":
-        page_range = _parse_page_range(args.pages, probe["pages"]) if args.pages else None
-        if args.max_pages:
+        page_range = _parse_page_range(options.pages, probe["pages"]) if options.pages else None
+        if options.max_pages:
             if page_range:
-                page_range = page_range[:args.max_pages]
+                page_range = page_range[:options.max_pages]
             else:
-                page_range = list(range(1, min(probe["pages"], args.max_pages) + 1))
+                page_range = list(range(1, min(probe["pages"], options.max_pages) + 1))
         rendered = render_pages(path, dpi, page_range, tmpdir, caps, verbose)
     else:
         rendered = [(1, path)]
 
     # Auto-detect language from first page
-    lang = args.lang
+    lang = options.lang
     if lang == "auto" and rendered:
         lang = detect_lang(rendered[0][1], caps, verbose)
         _log(f"language detected: {lang}", verbose)
@@ -1156,14 +1245,14 @@ def process_file(
     for pnum, img_path in rendered:
         t0 = time.time()
         pp_path = preprocess(img_path, pp_level, caps, tmpdir, verbose)
-        text, conf, words = ocr_tesseract(pp_path, lang, args.psm, caps, verbose)
+        text, conf, words = ocr_tesseract(pp_path, lang, options.psm, caps, verbose)
         elapsed = time.time() - t0
 
-        cleaned = general_cleanup(text) if not args.no_cleanup else text
+        cleaned = general_cleanup(text) if not options.no_cleanup else text
 
         # Determine flag
         flag = None
-        if conf < args.min_conf or looks_tabular(words):
+        if conf < options.min_conf or looks_tabular(words):
             flag = "review-vision"
 
         pages_data.append({
@@ -1177,6 +1266,45 @@ def process_file(
 
     cache.set(cache_key, {"pages": pages_data})
     return pages_data
+
+
+def recognize(
+    path: str | Path,
+    options: RecognizeOptions | None = None,
+    *,
+    caps: Caps | None = None,
+    cache: Cache | None = None,
+) -> list[dict]:
+    """Recognize one PDF/image file and return its page data (library entry point).
+
+    Manages a throwaway temp directory for rendered pages and cleans it up
+    before returning. Each returned page dict has: n, source, mean_conf,
+    flag, text, words (engine=vision-api instead returns a single combined
+    page whose `text` holds the whole document's Markdown). Format the
+    result with `to_markdown()`, `to_text()`, or `to_json()`.
+
+    `--engine vision` renders pages and hands them to an interactive
+    multimodal agent to read; it has no meaningful return value here, so
+    `recognize()` rejects it — use the CLI for that handoff workflow, or pick
+    another engine.
+
+    Raises:
+        OcrError: unsupported input type, missing required binaries/packages,
+            or a vision-api configuration/request failure.
+    """
+    options = options or RecognizeOptions()
+    if options.engine == "vision":
+        raise OcrError(
+            "engine='vision' hands rendered pages to an interactive agent and "
+            "has no return value; pick another engine or use the CLI.",
+            EXIT_BAD_ARGS,
+        )
+    caps = caps or Caps(verbose=options.verbose)
+    if options.engine in ("auto", "tesseract"):
+        caps.require_ocr()
+    cache = cache if cache is not None else Cache(None)
+    with tempfile.TemporaryDirectory(prefix="ocr_lib_") as tmpdir:
+        return process_file(str(path), options, caps, cache, tmpdir)
 
 
 # ── output writing ────────────────────────────────────────────────────────────
@@ -1331,6 +1459,23 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
+    options = RecognizeOptions(
+        engine=args.engine,
+        lang=args.lang,
+        dpi=args.dpi,
+        preprocess=args.preprocess,
+        pages=args.pages,
+        max_pages=args.max_pages,
+        psm=args.psm,
+        min_conf=args.min_conf,
+        no_cleanup=args.no_cleanup,
+        force=args.force,
+        vision_api_url=args.vision_api_url,
+        vision_api_key=args.vision_api_key,
+        vision_model=args.vision_model,
+        verbose=args.verbose,
+    )
+
     caps = Caps(verbose=args.verbose)
     caps_global = caps
 
@@ -1361,7 +1506,7 @@ def main() -> None:
             _log(f"processing: {input_path}", args.verbose)
             t_start = time.time()
 
-            pages_data = process_file(input_path, args, caps, cache, tmpdir)
+            pages_data = process_file(input_path, options, caps, cache, tmpdir)
 
             # Resolve effective lang for output meta (might have been auto-detected)
             effective_lang = args.lang
@@ -1383,4 +1528,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except OcrError as exc:
+        print(f"[ocr] ERROR: {exc}", file=sys.stderr)
+        sys.exit(exc.code)

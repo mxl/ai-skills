@@ -92,7 +92,7 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         "AGENT_HEALTH_CACHE_DIR": str(cache),
         "AGENT_HEALTH_OCR_ENGINE": "tesseract",
         "AGENT_HEALTH_OCR_SCRIPT": str(ocr_script),
-        "AGENT_HEALTH_TIMEOUT_SECONDS": "30",
+        "AGENT_HEALTH_OCR_TIMEOUT_SECONDS": "30",
         "FAKE_OCR_LOG": str(ocr_log),
     }
     for key, value in env.items():
@@ -149,6 +149,19 @@ def test_build_ocr_command_passes_engine(workspace):
     document = MODULE.scan_source(source)[0]
     command = MODULE.build_ocr_command(config, document)
     assert command[-4:] == ["--engine", "tesseract", "--format", "md"]
+
+
+def test_ocr_timeout_is_optional_and_defaults(workspace, monkeypatch):
+    monkeypatch.delenv("AGENT_HEALTH_OCR_TIMEOUT_SECONDS", raising=False)
+    assert MODULE.load_config().timeout == 600
+
+
+def test_ocr_timeout_override_and_validation(workspace, monkeypatch):
+    monkeypatch.setenv("AGENT_HEALTH_OCR_TIMEOUT_SECONDS", "45")
+    assert MODULE.load_config().timeout == 45
+    monkeypatch.setenv("AGENT_HEALTH_OCR_TIMEOUT_SECONDS", "0")
+    with pytest.raises(MODULE.RecognitionError, match="positive"):
+        MODULE.load_config()
 
 
 def test_vision_api_env_maps_to_ocr_flags(workspace, monkeypatch):
@@ -292,7 +305,7 @@ def test_multiple_source_dirs_route_by_basename(tmp_path, monkeypatch):
         "AGENT_HEALTH_CACHE_DIR": str(cache),
         "AGENT_HEALTH_OCR_ENGINE": "tesseract",
         "AGENT_HEALTH_OCR_SCRIPT": str(ocr_script),
-        "AGENT_HEALTH_TIMEOUT_SECONDS": "30",
+        "AGENT_HEALTH_OCR_TIMEOUT_SECONDS": "30",
     }
     for key, value in env.items():
         monkeypatch.setenv(key, value)

@@ -165,11 +165,11 @@ def load_config() -> Config:
         raise RecognitionError(f"ocr.py script not found: {ocr_script}")
 
     try:
-        timeout = int(os.environ.get("AGENT_HEALTH_TIMEOUT_SECONDS", "600"))
+        timeout = int(os.environ.get("AGENT_HEALTH_OCR_TIMEOUT_SECONDS", "600"))
     except ValueError as exc:
-        raise RecognitionError("AGENT_HEALTH_TIMEOUT_SECONDS must be an integer") from exc
+        raise RecognitionError("AGENT_HEALTH_OCR_TIMEOUT_SECONDS must be an integer") from exc
     if timeout <= 0:
-        raise RecognitionError("AGENT_HEALTH_TIMEOUT_SECONDS must be positive")
+        raise RecognitionError("AGENT_HEALTH_OCR_TIMEOUT_SECONDS must be positive")
 
     profile = {
         "engine": engine,

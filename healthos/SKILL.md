@@ -65,7 +65,6 @@ AGENT_HEALTH_SOURCE_DIR=/absolute/path/to/source
 AGENT_HEALTH_TARGET_DIR=/absolute/path/to/vault/03-areas/health
 AGENT_HEALTH_CACHE_DIR=~/Library/Caches/healthos
 AGENT_HEALTH_OCR_ENGINE=vision-api
-AGENT_HEALTH_TIMEOUT_SECONDS=600
 ```
 
 `AGENT_HEALTH_SOURCE_DIR` may list several source directories separated by `:`
@@ -85,8 +84,11 @@ AGENT_HEALTH_VISION_MODEL=model-name
 ```
 
 These map to `ocr.py --vision-api-url`, `--vision-api-key`, and `--vision-model`.
-Optionally set `AGENT_HEALTH_OCR_SCRIPT` to override the auto-detected
-`ocr/scripts/ocr.py` path.
+
+Optional overrides:
+
+- `AGENT_HEALTH_OCR_TIMEOUT_SECONDS` — per-document OCR timeout (default `600`).
+- `AGENT_HEALTH_OCR_SCRIPT` — override the auto-detected `ocr/scripts/ocr.py` path.
 
 Never write token values to files or logs. Do not create `.env` files in the
 vault or skill repository.

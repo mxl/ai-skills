@@ -858,6 +858,58 @@ def resolve_vision_config(
     return key, model, endpoint
 
 
+VISION_IMAGE_BYTE_LIMIT = 7_500_000   # raw bytes; safely under the API 10 MB cap
+VISION_JPEG_QUALITY = 92
+
+
+def _detect_media_type(raw: bytes) -> str:
+    if raw[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if raw[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/png"
+
+
+def _encode_page_b64(img_path: str, verbose: bool = False) -> tuple[str, str]:
+    """Return (base64_data, media_type), downscaling oversized images.
+
+    Fast path: images already under the byte limit are sent untouched with their
+    detected media type — no PIL, no re-encode, no quality loss.
+    Oversized images are re-encoded to JPEG at high quality (full resolution
+    first); if still over the limit, dimensions are reduced in a verify loop.
+    """
+    raw = Path(img_path).read_bytes()
+    if len(raw) <= VISION_IMAGE_BYTE_LIMIT:
+        return base64.b64encode(raw).decode(), _detect_media_type(raw)
+    try:
+        from PIL import Image
+    except ImportError:
+        _fatal("Pillow required to downscale an oversized page image for vision-api.\n"
+               "Install: uv run --with pillow,openai python3 ocr.py ...", EXIT_MISSING_BINARY)
+    img = Image.open(io.BytesIO(raw)).convert("RGB")
+
+    def encode_jpeg(im) -> bytes:
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=VISION_JPEG_QUALITY, subsampling=0)
+        return buf.getvalue()
+
+    # Step 1: JPEG re-encode at full resolution (keeps text sharp).
+    data = encode_jpeg(img)
+    # Step 2: reduce dimensions only if still oversized.
+    scale = 1.0
+    while len(data) > VISION_IMAGE_BYTE_LIMIT:
+        scale *= 0.85
+        w, h = img.size
+        nw, nh = max(1, int(w * scale)), max(1, int(h * scale))
+        data = encode_jpeg(img.resize((nw, nh), Image.LANCZOS))
+        if nw <= 1 or nh <= 1:
+            break
+    _log(f"downscaled oversized page image {len(raw)}B -> {len(data)}B JPEG", verbose)
+    return base64.b64encode(data).decode(), "image/jpeg"
+
+
 def vision_api(
     img_paths: list[tuple[int, str]],
     *,
@@ -889,11 +941,10 @@ def vision_api(
 
     for pnum, png_path in img_paths:
         _log(f"vision API: page {pnum} (model={model})", verbose)
-        with open(png_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode()
+        b64, media_type = _encode_page_b64(png_path, verbose)
         content = [
             {"type": "image_url",
-             "image_url": {"url": f"data:image/png;base64,{b64}", "detail": "high"}},
+             "image_url": {"url": f"data:{media_type};base64,{b64}", "detail": "high"}},
             {"type": "text",
              "text": ("Read this page image faithfully. Reproduce all visible text in "
                       "reading order. For tables use Markdown table syntax. For charts "

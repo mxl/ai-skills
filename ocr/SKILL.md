@@ -104,6 +104,11 @@ uv run --with openai python3 scripts/ocr.py slides.pdf --engine vision-api \
   --vision-api-key "$MY_KEY" --vision-model my-vision-model
 ```
 
+For `vision-api`, page images over ~7.5 MB are auto-re-encoded to JPEG (full
+resolution first, dimensions reduced only if still too large) to stay under
+the API's 10 MB per-image cap; this re-encode path requires Pillow. Images
+already under the limit are sent untouched with their detected media type.
+
 ## Engine tiers (summary)
 
 | Tier | Engine | Best for | Cost |

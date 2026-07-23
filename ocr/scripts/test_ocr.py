@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Unit tests for ocr.py pure helpers. Run: python3 scripts/test_ocr.py"""
 
+import base64
+import io
 import os
 import sys
 import tempfile
@@ -206,6 +208,69 @@ class VisionApiTimeoutKwarg(unittest.TestCase):
     def test_passes_timeout_kwarg_when_set(self):
         captured = self._call_vision_api(timeout=12.5)
         self.assertEqual(captured.get("timeout"), 12.5)
+
+
+try:
+    from PIL import Image as _PILImage
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
+
+
+class EncodePageB64(unittest.TestCase):
+    """_encode_page_b64 keeps small images untouched (correct media type) and
+    re-encodes oversized images to JPEG under the byte limit.
+    """
+
+    def _write(self, data: bytes) -> str:
+        tmp = tempfile.NamedTemporaryFile(suffix=".img", delete=False)
+        tmp.write(data)
+        tmp.close()
+        self.addCleanup(os.unlink, tmp.name)
+        return tmp.name
+
+    def test_small_png_passthrough(self):
+        raw = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+        path = self._write(raw)
+        b64, media_type = ocr._encode_page_b64(path)
+        self.assertEqual(media_type, "image/png")
+        self.assertEqual(base64.b64decode(b64), raw)
+
+    def test_small_jpeg_passthrough(self):
+        raw = b"\xff\xd8\xff\xe0" + b"\x00" * 32
+        path = self._write(raw)
+        b64, media_type = ocr._encode_page_b64(path)
+        self.assertEqual(media_type, "image/jpeg")
+        self.assertEqual(base64.b64decode(b64), raw)
+
+    @unittest.skipUnless(_HAS_PIL, "Pillow required")
+    def test_oversized_reencoded_under_limit(self):
+        # Noisy large image so PNG stays incompressible and exceeds the limit.
+        w = h = 4000
+        img = _PILImage.frombytes("RGB", (w, h), os.urandom(w * h * 3))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        raw = buf.getvalue()
+        self.assertGreater(len(raw), ocr.VISION_IMAGE_BYTE_LIMIT)
+        path = self._write(raw)
+        b64, media_type = ocr._encode_page_b64(path)
+        self.assertEqual(media_type, "image/jpeg")
+        self.assertLessEqual(len(base64.b64decode(b64)), ocr.VISION_IMAGE_BYTE_LIMIT)
+
+    def test_oversized_without_pil_fatals(self):
+        raw = b"\x89PNG\r\n\x1a\n" + b"\x00" * (ocr.VISION_IMAGE_BYTE_LIMIT + 1)
+        path = self._write(raw)
+        saved = sys.modules.get("PIL")
+        sys.modules["PIL"] = None  # force ImportError on `from PIL import Image`
+        try:
+            with self.assertRaises(ocr.OcrError) as ctx:
+                ocr._encode_page_b64(path)
+            self.assertEqual(ctx.exception.code, ocr.EXIT_MISSING_BINARY)
+        finally:
+            if saved is None:
+                del sys.modules["PIL"]
+            else:
+                sys.modules["PIL"] = saved
 
 
 if __name__ == "__main__":

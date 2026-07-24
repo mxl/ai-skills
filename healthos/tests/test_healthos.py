@@ -105,30 +105,6 @@ FAILING_OCR = textwrap.dedent(
 )
 
 
-def write_family(target: Path, *, ambiguous_roots: bool = False) -> None:
-    child_root = "." if ambiguous_roots else "child"
-    (target / "family.yaml").write_text(
-        textwrap.dedent(
-            f"""\
-            people:
-              - id: child
-                names:
-                  - Alex Example
-                birth_date: 2020-03-02
-                source_roots:
-                  - {child_root}
-              - id: adult
-                names:
-                  - Morgan Example
-                birth_date: 1990-01-01
-                source_roots:
-                  - adult
-            """
-        ),
-        encoding="utf-8",
-    )
-
-
 @pytest.fixture
 def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     source = tmp_path / "source"
@@ -139,7 +115,6 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     ocr_script = tmp_path / "fake_ocr.py"
     ocr_script.write_text(FAKE_OCR, encoding="utf-8")
     ocr_log = tmp_path / "ocr_calls.log"
-    write_family(target)
 
     env = {
         "AGENT_HEALTH_SOURCE_DIR": str(source),
@@ -159,15 +134,17 @@ def ocr_calls(log: Path) -> list[str]:
     return log.read_text(encoding="utf-8").splitlines() if log.exists() else []
 
 
-def test_recognizes_routes_and_reuses_cache(workspace):
+def test_mirrors_source_and_reuses_cache(workspace):
     source, target, _, log = workspace
     (source / "child-scan.png").write_bytes(PNG_1X1)
 
     assert MODULE.main([]) == 0
-    output = target / "people" / "child" / "unknown" / "child-scan.md"
+    output = target / "child-scan.md"
     assert output.is_file()
     content = output.read_text(encoding="utf-8")
-    assert 'person: "child"' in content
+    assert "person:" not in content
+    assert "assignment_reason:" not in content
+    assert 'status: "recognized"' in content
     assert "| HGB | 120 |" in content
     assert "# scan" not in content
     assert len(ocr_calls(log)) == 1
@@ -179,21 +156,34 @@ def test_recognizes_routes_and_reuses_cache(workspace):
     assert MODULE.main(["--check"]) == 0
 
 
-def test_routes_by_year_path(workspace):
+def test_mirrors_nested_source_structure(workspace):
     source, target, _, _ = workspace
     (source / "2023").mkdir()
     (source / "2023" / "child-visit.png").write_bytes(PNG_1X1)
     assert MODULE.main([]) == 0
-    assert (target / "people" / "child" / "2023" / "child-visit.md").is_file()
+    assert (target / "2023" / "child-visit.md").is_file()
+    assert not (target / "people").exists()
+    assert not (target / "_unassigned").exists()
 
 
-def test_unmatched_identity_goes_to_unassigned(workspace):
+def test_mirror_no_family_yaml_required(workspace):
     source, target, _, _ = workspace
+    assert not (target / "family.yaml").exists()
     (source / "stranger-doc.png").write_bytes(PNG_1X1)
     assert MODULE.main([]) == 0
-    output = target / "_unassigned" / "unknown" / "stranger-doc.md"
-    assert output.is_file()
-    assert 'status: "unassigned"' in output.read_text(encoding="utf-8")
+    assert (target / "stranger-doc.md").is_file()
+
+
+def test_name_collision_gets_sha_prefix(workspace):
+    source, target, _, _ = workspace
+    # Two different source files with the same stem in the same folder.
+    (source / "report.png").write_bytes(PNG_1X1)
+    (source / "report.jpg").write_bytes(PNG_1X1 + b"\x00")
+    assert MODULE.main([]) == 0
+    outputs = sorted(p.name for p in target.glob("*.md"))
+    assert "report.md" in outputs
+    assert any(name != "report.md" and name.endswith("report.md") for name in outputs)
+    assert len(outputs) == 2
 
 
 def test_run_ocr_passes_engine_to_recognize_options(workspace):
@@ -253,8 +243,7 @@ def test_main_stops_and_reports_stderr_on_recognition_error(workspace, monkeypat
 
     captured = capsys.readouterr()
     assert "Error: child.png: ocr recognition failed: boom" in captured.err
-    assert not (target / "_unassigned").exists()
-    assert not (target / "recognition-index.md").exists()
+    assert not (target / "child.md").exists()
 
 
 def test_ocr_timeout_is_optional_and_defaults(workspace, monkeypatch):
@@ -305,42 +294,6 @@ def test_vision_api_requires_all_config(workspace, monkeypatch, missing):
         MODULE.load_config()
 
 
-def test_identity_matching(tmp_path):
-    write_family(tmp_path)
-    people = MODULE.load_family(tmp_path)
-    assert MODULE.assign_person(
-        "ALEX EXAMPLE 02.03.2020", "report.png", people
-    ) == ("child", "identity_match")
-    assert MODULE.assign_person(
-        "Patient: Alex Example", "report.png", people
-    ) == ("child", "identity_match")
-    assert MODULE.assign_person(
-        "Alex Example and Morgan Example", "report.png", people
-    ) == (None, "identity_conflict")
-
-
-def test_source_root_fallback(tmp_path):
-    write_family(tmp_path)
-    people = MODULE.load_family(tmp_path)
-    assert MODULE.assign_person("text without a name", "adult/report.png", people) == (
-        "adult",
-        "source_root_match",
-    )
-    assert MODULE.assign_person("text without a name", "other/report.png", people) == (
-        None,
-        "identity_missing",
-    )
-
-
-def test_ambiguous_source_roots_are_unassigned(tmp_path):
-    write_family(tmp_path, ambiguous_roots=True)
-    people = MODULE.load_family(tmp_path)
-    assert MODULE.assign_person("text without a name", "adult/report.png", people) == (
-        None,
-        "identity_missing",
-    )
-
-
 def test_rejects_nested_roots():
     source = Path("/tmp/source")
     with pytest.raises(MODULE.RecognitionError):
@@ -389,8 +342,8 @@ def test_index_command_matches_default(workspace):
     source, target, _, _ = workspace
     (source / "child-scan.png").write_bytes(PNG_1X1)
     assert MODULE.main(["index"]) == 0
-    assert (target / "recognition-index.md").is_file()
-    assert (target / "people" / "child" / "unknown" / "child-scan.md").is_file()
+    assert (target / "child-scan.md").is_file()
+    assert not (target / "recognition-index.md").exists()
 
 
 def test_parse_source_dirs_splits_on_colon(tmp_path):
@@ -413,7 +366,7 @@ def test_parse_source_dirs_rejects_duplicate_names(tmp_path):
         MODULE.parse_source_dirs(f"{first}:{second}")
 
 
-def test_multiple_source_dirs_route_by_basename(tmp_path, monkeypatch):
+def test_multiple_source_dirs_mirror_with_prefix(tmp_path, monkeypatch):
     src_child = tmp_path / "child"
     src_adult = tmp_path / "adult"
     target = tmp_path / "target"
@@ -422,9 +375,7 @@ def test_multiple_source_dirs_route_by_basename(tmp_path, monkeypatch):
         directory.mkdir()
     ocr_script = tmp_path / "fake_ocr.py"
     ocr_script.write_text(FAKE_OCR, encoding="utf-8")
-    write_family(target)
-    # Neutral filenames so routing relies on the source-dir basename prefix,
-    # which maps to each person's configured source_root.
+    # With multiple source dirs, each is mirrored under its basename prefix.
     (src_child / "report.png").write_bytes(PNG_1X1)
     (src_adult / "report.png").write_bytes(PNG_1X1)
 
@@ -440,6 +391,6 @@ def test_multiple_source_dirs_route_by_basename(tmp_path, monkeypatch):
         monkeypatch.setenv(key, value)
 
     assert MODULE.main(["index"]) == 0
-    assert (target / "people" / "child" / "unknown" / "report.md").is_file()
-    assert (target / "people" / "adult" / "unknown" / "report.md").is_file()
+    assert (target / "child" / "report.md").is_file()
+    assert (target / "adult" / "report.md").is_file()
     assert MODULE.main(["index", "--check"]) == 0

@@ -24,10 +24,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Iterable
 
-import yaml
 
-
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 SUPPORTED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 VISION_ENGINE = "vision-api"
 BANNED_OPENERS = (
@@ -338,138 +336,6 @@ def recognize_document(
     return markdown, False, recognized_at
 
 
-def load_family(target: Path) -> list[dict[str, Any]]:
-    family_path = target / "family.yaml"
-    if not family_path.is_file():
-        raise RecognitionError(f"Missing family configuration: {family_path}")
-    data = yaml.safe_load(family_path.read_text(encoding="utf-8"))
-    people = data.get("people") if isinstance(data, dict) else None
-    if not isinstance(people, list) or not people:
-        raise RecognitionError("family.yaml must contain a non-empty people list")
-    seen_ids: set[str] = set()
-    normalized: list[dict[str, Any]] = []
-    for person in people:
-        if not isinstance(person, dict):
-            raise RecognitionError("Each family person must be a mapping")
-        person_id = person.get("id")
-        names = person.get("names")
-        birth_date = normalize_date(person.get("birth_date"))
-        roots = person.get("source_roots", [])
-        if not isinstance(person_id, str) or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", person_id):
-            raise RecognitionError(f"Invalid family person id: {person_id!r}")
-        if person_id in seen_ids:
-            raise RecognitionError(f"Duplicate family person id: {person_id}")
-        if not isinstance(names, list) or not names or not all(isinstance(name, str) for name in names):
-            raise RecognitionError(f"Person {person_id} must have names")
-        if birth_date is None:
-            raise RecognitionError(f"Person {person_id} must have a valid birth_date")
-        if not isinstance(roots, list) or not all(isinstance(root, str) for root in roots):
-            raise RecognitionError(f"Person {person_id} source_roots must be strings")
-        seen_ids.add(person_id)
-        normalized.append(
-            {
-                "id": person_id,
-                "names": names,
-                "name_token_variants": [name_tokens(name) for name in names],
-                "birth_date": birth_date,
-                "birth_date_forms": birthdate_forms(birth_date),
-                "source_roots": [normalize_root(root) for root in roots],
-            }
-        )
-    return normalized
-
-
-def normalize_root(value: str) -> str:
-    value = value.strip().strip("/")
-    return "." if not value or value == "." else value.casefold()
-
-
-def fold_text(value: str) -> str:
-    return value.casefold().replace("ё", "е")
-
-
-def name_tokens(value: str) -> list[str]:
-    return re.findall(r"[a-zа-я0-9]+", fold_text(value))
-
-
-def normalize_date(value: Any) -> str | None:
-    if isinstance(value, dt.datetime):
-        return value.date().isoformat()
-    if isinstance(value, dt.date):
-        return value.isoformat()
-    if not isinstance(value, str):
-        return None
-    value = value.strip()
-    for pattern in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y"):
-        try:
-            return dt.datetime.strptime(value, pattern).date().isoformat()
-        except ValueError:
-            pass
-    return None
-
-
-def birthdate_forms(iso_date: str) -> list[str]:
-    year, month, day = (int(part) for part in iso_date.split("-"))
-    return [
-        f"{day:02d}.{month:02d}.{year}",
-        f"{day}.{month}.{year}",
-        f"{year:04d}-{month:02d}-{day:02d}",
-        f"{day:02d}/{month:02d}/{year}",
-    ]
-
-
-def name_in_text(folded_text: str, tokens: list[str]) -> bool:
-    if not tokens:
-        return False
-    pattern = r"\b" + r"[^0-9a-zа-я]+".join(re.escape(token) for token in tokens) + r"\b"
-    return re.search(pattern, folded_text) is not None
-
-
-def birthdate_in_text(text: str, forms: list[str]) -> bool:
-    return any(form in text for form in forms)
-
-
-def source_root_candidates(relative: str, people: list[dict[str, Any]]) -> set[str]:
-    relative_folded = relative.casefold()
-    candidates: set[str] = set()
-    for person in people:
-        for root in person["source_roots"]:
-            if root == "." or relative_folded == root or relative_folded.startswith(f"{root}/"):
-                candidates.add(person["id"])
-    return candidates
-
-
-def assign_person(
-    markdown: str, relative: str, people: list[dict[str, Any]]
-) -> tuple[str | None, str]:
-    folded = fold_text(markdown)
-    name_matches: set[str] = set()
-    strong_matches: set[str] = set()
-    for person in people:
-        has_name = any(
-            name_in_text(folded, tokens) for tokens in person["name_token_variants"]
-        )
-        if not has_name:
-            continue
-        name_matches.add(person["id"])
-        if birthdate_in_text(markdown, person["birth_date_forms"]):
-            strong_matches.add(person["id"])
-
-    if len(strong_matches) == 1:
-        return next(iter(strong_matches)), "identity_match"
-    if len(strong_matches) > 1:
-        return None, "identity_conflict"
-    if len(name_matches) == 1:
-        return next(iter(name_matches)), "identity_match"
-    if len(name_matches) > 1:
-        return None, "identity_conflict"
-
-    roots = source_root_candidates(relative, people)
-    if len(roots) == 1:
-        return next(iter(roots)), "source_root_match"
-    return None, "identity_missing"
-
-
 def validate_markdown(markdown: str) -> list[str]:
     issues: list[str] = []
     stripped = markdown.strip()
@@ -516,13 +382,6 @@ def safe_source_name(path: Path) -> str:
     return stem or "document"
 
 
-def infer_year(relative: str) -> str:
-    for part in Path(relative).parts:
-        if re.fullmatch(r"(?:19|20)\d{2}", part):
-            return part
-    return "unknown"
-
-
 def strip_leading_h1(markdown: str) -> str:
     lines = markdown.splitlines()
     index = 0
@@ -544,13 +403,14 @@ def read_frontmatter_source(path: Path) -> str | None:
     return json.loads(f'"{match.group(1)}"') if match else None
 
 
-def output_path_for(
-    config: Config, document: SourceDocument, person_id: str | None, year: str
-) -> Path:
-    parent = config.target / ("people" if person_id else "_unassigned")
-    if person_id:
-        parent = parent / person_id
-    parent = parent / year
+def output_path_for(config: Config, document: SourceDocument) -> Path:
+    """Mirror the source tree one-to-one under target.
+
+    The recognized Markdown lands at the same relative path as its source
+    document (subfolders preserved), with the source filename stem sanitized
+    and a `.md` suffix.
+    """
+    parent = config.target / Path(document.relative).parent
     candidate = parent / f"{safe_source_name(document.path)}.md"
     existing_source = read_frontmatter_source(candidate)
     if existing_source is not None and existing_source != document.relative:
@@ -562,15 +422,12 @@ def build_markdown(
     config: Config,
     document: SourceDocument,
     markdown: str,
-    person_id: str | None,
-    assignment_reason: str,
     status: str,
     issues: list[str],
     recognized_at: str,
 ) -> str:
     metadata = {
         "type": "medical-document",
-        "person": person_id,
         "source_path": document.relative,
         "source_sha256": document.sha256,
         "source_type": document.path.suffix.lower().lstrip("."),
@@ -579,7 +436,6 @@ def build_markdown(
         "ocr_script": config.ocr_script.name,
         "profile_sha256": config.profile_hash,
         "recognized_at": recognized_at,
-        "assignment_reason": assignment_reason,
         "status": status,
         "issues": issues,
     }
@@ -587,50 +443,20 @@ def build_markdown(
     return f"{markdown_frontmatter(metadata)}\n\n{body}\n".rstrip() + "\n"
 
 
-def build_index(config: Config, results: list[dict[str, Any]]) -> str:
-    counts: dict[str, int] = {}
-    for result in results:
-        key = result["person_id"] or "_unassigned"
-        counts[key] = counts.get(key, 0) + 1
-    lines = [
-        "# Recognized Medical Documents",
-        "",
-        f"- Profile: `{config.profile_hash}`",
-        f"- Engine: `{config.engine}`",
-        f"- Documents: {len(results)}",
-        "",
-        "## By Person",
-        "",
-    ]
-    for person_id in sorted(counts):
-        lines.append(f"- `{person_id}`: {counts[person_id]}")
-    lines.extend(["", "## Documents", ""])
-    for result in sorted(results, key=lambda item: item["relative"].casefold()):
-        lines.append(
-            f"- `{result['status']}` · `{result['person_id'] or '_unassigned'}` · "
-            f"`{result['relative']}` → `{result['output_relative']}`"
-        )
-        for issue in result["issues"]:
-            lines.append(f"  - {issue}")
-    return "\n".join(lines).rstrip() + "\n"
-
-
 def process(config: Config, check: bool) -> int:
     if not check:
         config.target.mkdir(parents=True, exist_ok=True)
         config.cache.mkdir(parents=True, exist_ok=True)
-    people = load_family(config.target)
     before_documents = scan_sources(config.sources)
     before_manifest = source_manifest(before_documents)
-    results: list[dict[str, Any]] = []
+    count = 0
     mismatches: list[str] = []
     for index, document in enumerate(before_documents, 1):
         print(f"[{index}/{len(before_documents)}] {document.relative}", flush=True)
         try:
             markdown, cache_hit, recognized_at = recognize_document(config, document, check)
             issues = validate_markdown(markdown)
-            person_id, assignment_reason = assign_person(markdown, document.relative, people)
-            status = "failed" if issues else ("recognized" if person_id else "unassigned")
+            status = "failed" if issues else "recognized"
         except Exception as exc:
             if check:
                 mismatches.append(f"{document.relative}: {exc}")
@@ -638,43 +464,14 @@ def process(config: Config, check: bool) -> int:
             print(f"Error: {document.relative}: {exc}", file=sys.stderr)
             return 1
 
-        year = infer_year(document.relative)
-        output_path = output_path_for(
-            config, document, person_id if status == "recognized" else None, year
-        )
-        rendered = build_markdown(
-            config,
-            document,
-            markdown,
-            person_id if status == "recognized" else None,
-            assignment_reason,
-            status,
-            issues,
-            recognized_at,
-        )
+        output_path = output_path_for(config, document)
+        rendered = build_markdown(config, document, markdown, status, issues, recognized_at)
         if check:
             if not output_path.is_file() or output_path.read_text(encoding="utf-8") != rendered:
                 mismatches.append(f"{document.relative}: output mismatch at {output_path}")
         else:
             atomic_write(output_path, rendered, [config.target])
-        results.append(
-            {
-                "relative": document.relative,
-                "person_id": person_id if status == "recognized" else None,
-                "status": status,
-                "issues": issues,
-                "cache_hit": cache_hit,
-                "output_relative": output_path.relative_to(config.target).as_posix(),
-            }
-        )
-
-    index_content = build_index(config, results)
-    index_path = config.target / "recognition-index.md"
-    if check:
-        if not index_path.is_file() or index_path.read_text(encoding="utf-8") != index_content:
-            mismatches.append("recognition-index.md mismatch")
-    else:
-        atomic_write(index_path, index_content, [config.target])
+        count += 1
 
     after_manifest = source_manifest(scan_sources(config.sources))
     if before_manifest != after_manifest:
@@ -685,7 +482,7 @@ def process(config: Config, check: bool) -> int:
         for mismatch in mismatches:
             print(f"- {mismatch}")
         return 1
-    print(f"Processed {len(results)} documents. Profile: {config.profile_hash}")
+    print(f"Processed {count} documents. Profile: {config.profile_hash}")
     return 0
 
 
@@ -698,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
         nargs="?",
         default="index",
         choices=["index"],
-        help="Command to run (default: index — recognize documents and rebuild the index)",
+        help="Command to run (default: index — mirror recognized documents into target)",
     )
     parser.add_argument("--check", action="store_true", help="Verify cache and outputs without writes")
     args = parser.parse_args(argv)

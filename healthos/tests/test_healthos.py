@@ -366,7 +366,7 @@ def test_parse_source_dirs_rejects_duplicate_names(tmp_path):
         MODULE.parse_source_dirs(f"{first}:{second}")
 
 
-def test_multiple_source_dirs_mirror_with_prefix(tmp_path, monkeypatch):
+def test_multiple_source_dirs_mirror_contents_flat(tmp_path, monkeypatch):
     src_child = tmp_path / "child"
     src_adult = tmp_path / "adult"
     target = tmp_path / "target"
@@ -375,7 +375,44 @@ def test_multiple_source_dirs_mirror_with_prefix(tmp_path, monkeypatch):
         directory.mkdir()
     ocr_script = tmp_path / "fake_ocr.py"
     ocr_script.write_text(FAKE_OCR, encoding="utf-8")
-    # With multiple source dirs, each is mirrored under its basename prefix.
+    # Multiple source dirs mirror only their contents, flat, with no source
+    # directory name prepended. Distinct documents that collide on the same
+    # relative path are disambiguated by a content-hash filename prefix.
+    (src_child / "report.png").write_bytes(PNG_1X1)
+    (src_adult / "report.png").write_bytes(PNG_1X1 + b"\x00")
+
+    env = {
+        "AGENT_HEALTH_SOURCE_DIR": f"{src_child}:{src_adult}",
+        "AGENT_HEALTH_TARGET_DIR": str(target),
+        "AGENT_HEALTH_CACHE_DIR": str(cache),
+        "AGENT_HEALTH_OCR_ENGINE": "tesseract",
+        "AGENT_HEALTH_OCR_SCRIPT": str(ocr_script),
+        "AGENT_HEALTH_OCR_TIMEOUT_SECONDS": "30",
+    }
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+
+    assert MODULE.main(["index"]) == 0
+    assert not (target / "child").exists()
+    assert not (target / "adult").exists()
+    outputs = sorted(p.name for p in target.glob("*.md"))
+    assert "report.md" in outputs
+    assert any(name != "report.md" and name.endswith("report.md") for name in outputs)
+    assert len(outputs) == 2
+    assert MODULE.main(["index", "--check"]) == 0
+
+
+def test_multiple_source_dirs_dedupe_identical_content(tmp_path, monkeypatch):
+    src_child = tmp_path / "child"
+    src_adult = tmp_path / "adult"
+    target = tmp_path / "target"
+    cache = tmp_path / "cache"
+    for directory in (src_child, src_adult, target):
+        directory.mkdir()
+    ocr_script = tmp_path / "fake_ocr.py"
+    ocr_script.write_text(FAKE_OCR, encoding="utf-8")
+    # Identical content at the same relative path is the same document; it
+    # must collapse to a single output, not produce a spurious hash prefix.
     (src_child / "report.png").write_bytes(PNG_1X1)
     (src_adult / "report.png").write_bytes(PNG_1X1)
 
@@ -391,6 +428,6 @@ def test_multiple_source_dirs_mirror_with_prefix(tmp_path, monkeypatch):
         monkeypatch.setenv(key, value)
 
     assert MODULE.main(["index"]) == 0
-    assert (target / "child" / "report.md").is_file()
-    assert (target / "adult" / "report.md").is_file()
+    outputs = sorted(p.name for p in target.glob("*.md"))
+    assert outputs == ["report.md"]
     assert MODULE.main(["index", "--check"]) == 0

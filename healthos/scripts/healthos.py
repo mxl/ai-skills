@@ -25,7 +25,7 @@ from types import ModuleType
 from typing import Any, Iterable
 
 
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 SUPPORTED_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
 VISION_ENGINE = "vision-api"
 BANNED_OPENERS = (
@@ -248,11 +248,12 @@ def scan_source(source: Path, prefix: str = "") -> list[SourceDocument]:
 
 def scan_sources(sources: Iterable[Path]) -> list[SourceDocument]:
     sources = tuple(sources)
-    multi = len(sources) > 1
     documents: list[SourceDocument] = []
     for source in sources:
-        prefix = f"{source.name}/" if multi else ""
-        documents.extend(scan_source(source, prefix))
+        # Mirror only the contents of each source directory. The source
+        # directory name is never prepended, so a single source and multiple
+        # sources both map their inner tree flat onto the target root.
+        documents.extend(scan_source(source))
     documents.sort(key=lambda doc: doc.relative.casefold())
     return documents
 
@@ -395,11 +396,11 @@ def strip_leading_h1(markdown: str) -> str:
     return markdown.strip()
 
 
-def read_frontmatter_source(path: Path) -> str | None:
+def read_frontmatter_field(path: Path, field: str) -> str | None:
     if not path.is_file():
         return None
     content = path.read_text(encoding="utf-8", errors="replace")
-    match = re.search(r'^source_path:\s*"(.*)"\s*$', content, re.MULTILINE)
+    match = re.search(rf'^{field}:\s*"(.*)"\s*$', content, re.MULTILINE)
     return json.loads(f'"{match.group(1)}"') if match else None
 
 
@@ -409,11 +410,17 @@ def output_path_for(config: Config, document: SourceDocument) -> Path:
     The recognized Markdown lands at the same relative path as its source
     document (subfolders preserved), with the source filename stem sanitized
     and a `.md` suffix.
+
+    Because source directory names are not prepended, two distinct documents
+    from different source roots can share the same relative path. To avoid
+    silent overwrites, when the candidate file already belongs to a different
+    source document (different content hash) the filename is prefixed with a
+    short content hash.
     """
     parent = config.target / Path(document.relative).parent
     candidate = parent / f"{safe_source_name(document.path)}.md"
-    existing_source = read_frontmatter_source(candidate)
-    if existing_source is not None and existing_source != document.relative:
+    existing_sha = read_frontmatter_field(candidate, "source_sha256")
+    if existing_sha is not None and existing_sha != document.sha256:
         candidate = parent / f"{document.sha256[:8]}-{safe_source_name(document.path)}.md"
     return candidate
 

@@ -2,6 +2,10 @@
 
 Date: 2026-06-19
 
+> The `ocr` skill has moved to a standalone package
+> ([`pro-ledin-ocr`](https://github.com/ledin-pro/ocr), `pip install pro-ledin-ocr`).
+> The commands below use the installed `ocr` console script.
+
 ## Context
 
 While filling a local LLM benchmark table from Hugging Face model cards, several benchmark tables were available only as images. The OCR skill was available through `skills.paths` and was loaded successfully. We tested the baseline Tesseract path on downloaded benchmark images, then compared it with the skill's vision-tier workflow.
@@ -19,13 +23,13 @@ Test images:
 Baseline OCR:
 
 ```bash
-python3 ~/projects/ai-skills/ocr/scripts/ocr.py <images...> --format all --out <out-dir> --verbose
+ocr <images...> --format all --out <out-dir> --verbose
 ```
 
 Single-block retry for difficult tables/plots:
 
 ```bash
-python3 ~/projects/ai-skills/ocr/scripts/ocr.py qwen3coder30_main.jpg hermes70_b.png --format all --out <out-dir> --psm 6 --verbose
+ocr qwen3coder30_main.jpg hermes70_b.png --format all --out <out-dir> --psm 6 --verbose
 ```
 
 ## Review-Vision Flag Logic

@@ -48,6 +48,10 @@
     "should_trigger": true
   },
   {
+    "query": "Import Granola transcripts into my Obsidian vault. Discover exported transcripts first and ask before fetching additional meetings.",
+    "should_trigger": true
+  },
+  {
     "query": "Process my interview notes for the Senior Product Manager opportunity at Acme and update the opportunity record.",
     "should_trigger": false
   },

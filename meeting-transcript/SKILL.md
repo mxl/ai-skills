@@ -47,6 +47,15 @@ Inference rules:
 
 If the request is ambiguous, infer the minimal safe action from the available content. Ask one short question only when missing information would cause the wrong file, entity, date, or folder.
 
+## Source Discovery And Handoff
+
+For a request to import transcripts, route through this skill first. Infer the source from the request, supplied files, or artifact metadata rather than relying on a source name in the trigger rules.
+
+- Resolve the source-export directory in this order: an explicit user path, the selected source skill's documented configuration, then that skill's documented default. The directory is configurable; never assume a fixed project path.
+- Inspect only that resolved directory for relevant exported JSON before requesting a new fetch. Use an existing canonical `*.meeting-transcript.json` artifact directly. For source-native JSON, run that source's documented adapter to produce canonical meeting JSON before `prepare` and `import`.
+- If no suitable export exists, or the user may want transcripts beyond the discovered files, ask whether to run the selected source skill to discover or fetch additional transcripts. Do not fetch automatically unless the user explicitly approved it.
+- Keep source discovery separate from vault import. Do not choose a target or write rendered meeting files until entity discovery is complete.
+
 ## Structured Pipeline
 
 Every meeting first becomes canonical JSON validated by `schemas/meeting.schema.json`. Only `raw` is source-specific. Populate every declared field; use empty strings or arrays when unavailable:

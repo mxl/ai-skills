@@ -2,7 +2,7 @@
 
 Reusable [Agent Skills](https://agentskills.io) for OpenCode and compatible coding assistants. This repository packages task-specific instructions, references, evals, fixtures, and deterministic helper scripts for workflows that benefit from repeatable handling instead of ad-hoc prompting.
 
-The current collection focuses on document automation, PDFs, video summaries, meeting transcript storage, domain availability checks, and domain/name suggestion.
+The current collection focuses on document automation, PDFs, video summaries, meeting transcript capture and storage, domain availability checks, and domain/name suggestion.
 
 > The `ocr` and `healthos` skills have moved to standalone repositories and are
 > published on PyPI: [`pro-ledin-ocr`](https://github.com/ledin-pro/ocr)
@@ -21,6 +21,7 @@ The `docx` and `pptx` skills share a common OOXML engine in [`common/ooxml/`](co
 | [`pdf`](pdf/) | Read, extract, create, merge, split, render, inspect, and verify PDF files. | Tool-routing guidance and visual verification workflow |
 | [`video-summary`](video-summary/) | Summarize YouTube videos/playlists, web videos, local video files, streams, transcripts, audio, and frames. | Configurable presets, `yt-dlp` subtitle helper, `peepshow` orchestration, Fabric prompt routing |
 | [`meeting-transcript`](meeting-transcript/) | Save meeting transcripts and verified summaries into an Obsidian-style vault. | Storage rules, summary verification, action-item extraction guidance |
+| [`screenpipe`](screenpipe/) | Export detected Screenpipe meetings and full transcripts for `meeting-transcript`. | Authenticated local API fetcher, interactive range selection, raw + canonical JSON artifacts |
 | [`regru`](regru/) | Check exact domain names for availability through REG.RU API 2. | Self-contained REG.RU `domain/check` CLI with optional client SSL auth |
 | [`domain-check`](domain-check/) | Check exact domain availability for .ru, .рф, and other TLDs using public registry signals (RDAP/WHOIS). | No-API availability CLI with IDN support |
 | [`domain-suggest`](domain-suggest/) | Brainstorm brandable domain/name ideas for a startup, product, or project, then verify availability by delegating to `domain-check`. | Naming methodology + generation-technique references; reuses the no-API availability CLI |
@@ -53,6 +54,7 @@ ln -s /path/to/ai-skills/pptx ~/.claude/skills/pptx
 ln -s /path/to/ai-skills/pdf ~/.claude/skills/pdf
 ln -s /path/to/ai-skills/video-summary ~/.claude/skills/video-summary
 ln -s /path/to/ai-skills/meeting-transcript ~/.claude/skills/meeting-transcript
+ln -s /path/to/ai-skills/screenpipe ~/.claude/skills/screenpipe
 ln -s /path/to/ai-skills/regru ~/.claude/skills/regru
 ln -s /path/to/ai-skills/domain-check ~/.claude/skills/domain-check
 ln -s /path/to/ai-skills/domain-suggest ~/.claude/skills/domain-suggest
@@ -73,6 +75,7 @@ Install only the dependencies required by the skills you use.
 | Dependency | Used by | Example macOS install |
 | --- | --- | --- |
 | Python 3.9+ | `docx`, `pptx`, `pdf` | `brew install python` |
+| Python 3.10+ | `meeting-transcript`, `screenpipe` | `brew install python` |
 | Node.js | `pptx` (PptxGenJS), `video-summary`, `regru` | `brew install node` |
 | `defusedxml` | `docx`, `pptx` — XML parsing | `python3 -m pip install defusedxml` |
 | `python-docx` | `docx` — extraction and simple document generation | `python3 -m pip install python-docx` |
@@ -83,6 +86,8 @@ Install only the dependencies required by the skills you use.
 | LibreOffice | `docx`, `pptx` — `.doc`/`.ppt` conversion and PDF rendering | `brew install --cask libreoffice` |
 | `poppler` | `pptx` — slide thumbnails; `pdf` — PDF inspection/rendering | `brew install poppler` |
 | `yt-dlp` | `video-summary` | `python3 -m pip install yt-dlp` |
+| `jsonschema` | `meeting-transcript`, `screenpipe` | `python3 -m pip install 'jsonschema>=4.25,<5'` |
+| Screenpipe desktop + local API key | `screenpipe` | Run Screenpipe, then set `SCREENPIPE_LOCAL_API_KEY` from `bun x screenpipe@latest auth token`. |
 | REG.RU partner API credentials | `regru` | Set `REGRU_USERNAME` and `REGRU_PASSWORD`; optionally `REGRU_SSL_CERT_PATH` and `REGRU_SSL_KEY_PATH`. REG.RU `domain/check` requires partner/reseller access. |
 | WhoisXML API key | `domain-check` | Set `WHOISXML_API_KEY` environment variable (only for legacy WhoisXML fallback). |
 
@@ -123,6 +128,12 @@ ai-skills/
 ├── meeting-transcript/
 │   ├── SKILL.md
 │   └── templates/
+│   └── evals/
+├── screenpipe/
+│   ├── SKILL.md
+│   ├── scripts/
+│   ├── references/
+│   ├── tests/
 │   └── evals/
 ├── regru/
 │   ├── SKILL.md

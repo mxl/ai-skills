@@ -1,0 +1,38 @@
+{
+  "skill_name": "screenpipe",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Export Screenpipe meeting 274 from my local app. Keep the raw API data and create the meeting-transcript handoff, but do not save anything into my vault yet.",
+      "expected_output": "Runs the Screenpipe fetcher with --meeting-id 274, produces raw and canonical JSON paths, and stops before meeting-transcript import.",
+      "files": [],
+      "assertions": [
+        "Uses scripts/screenpipe_fetch.py with --meeting-id 274.",
+        "Reports both .screenpipe.json and .meeting-transcript.json outputs.",
+        "Does not choose a vault target or invoke meeting-transcript import."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Find my Screenpipe meetings between 2026-07-28 and 2026-07-31 that mention pricing, let me choose one, then export its transcript for meeting-transcript.",
+      "expected_output": "Runs date-range discovery with the pricing query, preserves interactive selection, and creates both source and canonical artifacts.",
+      "files": [],
+      "assertions": [
+        "Uses --from, --to, and --query pricing rather than an unbounded search.",
+        "Does not pass --all without explicit bulk approval.",
+        "Explains that the canonical JSON is the meeting-transcript handoff."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "I already have .screenpipe/2026-07-30-design-review-81.screenpipe.json. Convert it to the canonical meeting transcript format without contacting Screenpipe again.",
+      "expected_output": "Runs the standalone adapter on the existing raw file and reports the schema-validated canonical output.",
+      "files": [],
+      "assertions": [
+        "Uses scripts/export_for_meeting_transcript_skill.py, not the network fetcher.",
+        "Preserves raw data and validates against the canonical meeting schema.",
+        "Does not require or expose SCREENPIPE_LOCAL_API_KEY."
+      ]
+    }
+  ]
+}

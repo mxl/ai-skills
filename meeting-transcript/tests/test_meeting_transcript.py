@@ -42,6 +42,18 @@ def meeting(title="Planning", text="Keep this exact.\nSecond line."):
     }
 
 
+def transcript_only_meeting():
+    value = meeting()
+    value["notes"] = []
+    return value
+
+
+def notes_only_meeting():
+    value = meeting()
+    value["transcript"] = []
+    return value
+
+
 def summary():
     return {
         "context": "Planning context.",
@@ -77,6 +89,22 @@ class SchemaAndPromptTests(unittest.TestCase):
         self.assertIn("Keep this exact.\nSecond line.", text)
         self.assertNotIn("secret_duplicate", text)
 
+    def test_transcript_only_meeting_uses_generate_summary_mode(self):
+        value = transcript_only_meeting()
+        text = mt.summarization_text(value)
+        self.assertEqual(mt.infer_mode(value), "generate-summary")
+        self.assertIn("Mode: generate-summary", text)
+        self.assertIn("Keep this exact.\nSecond line.", text)
+        self.assertNotIn("Provided notes:", text)
+
+    def test_notes_only_meeting_uses_save_mode(self):
+        value = notes_only_meeting()
+        text = mt.summarization_text(value)
+        self.assertEqual(mt.infer_mode(value), "save")
+        self.assertIn("Mode: save", text)
+        self.assertIn("Provided notes:", text)
+        self.assertNotIn("Transcript:", text)
+
     def test_artifact_keys_avoid_shared_cache_collision(self):
         first = mt.artifact_key(meeting("Same"))
         second_meeting = meeting("Same")
@@ -109,6 +137,36 @@ class CommandTests(unittest.TestCase):
             self.assertIn("summary_schema", packet)
             self.assertNotIn("secret_duplicate", packet["user_prompt"])
 
+    def test_prepare_transcript_only_returns_generate_summary_packet(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = self.write_json(root / "input.json", transcript_only_meeting())
+            output = io.StringIO()
+            args = mt.build_parser().parse_args(["prepare", str(source)])
+            with redirect_stdout(output):
+                self.assertEqual(args.func(args), 0)
+            packet = json.loads(output.getvalue())
+            self.assertEqual(packet["mode"], "generate-summary")
+            self.assertIn("Keep this exact.\nSecond line.", packet["user_prompt"])
+            self.assertNotIn("Provided notes:", packet["user_prompt"])
+            self.assertEqual(Path(packet["meeting_json"]).parent.parent, root.resolve())
+
+    def test_prepare_improve_packet_includes_notes_and_transcript(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            value = meeting()
+            value["notes"] = [{"title": "Provided summary", "text": "Prior claim."}]
+            source = self.write_json(root / "input.json", value)
+            output = io.StringIO()
+            args = mt.build_parser().parse_args(["prepare", str(source)])
+            with redirect_stdout(output):
+                self.assertEqual(args.func(args), 0)
+            packet = json.loads(output.getvalue())
+            self.assertEqual(packet["mode"], "improve")
+            self.assertIn("### Provided summary\nPrior claim.", packet["user_prompt"])
+            self.assertIn("Keep this exact.\nSecond line.", packet["user_prompt"])
+            self.assertNotIn("secret_duplicate", packet["user_prompt"])
+
     def test_import_writes_artifacts_and_default_markdown(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -129,6 +187,63 @@ class CommandTests(unittest.TestCase):
             self.assertIn("Keep this exact.\nSecond line.", transcript)
             self.assertIn("| Alice | Lead | Owns delivery |", rendered_summary)
             self.assertIn("[[transcript]]", rendered_summary)
+
+    def test_import_notes_only_renders_placeholder_transcript(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = self.write_json(root / "meeting.json", notes_only_meeting())
+            summary_path = self.write_json(root / "summary.json", summary())
+            out = root / "meeting-folder"
+            args = mt.build_parser().parse_args(
+                ["import", str(source), "--out", str(out), "--summary", str(summary_path)]
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(args.func(args), 0)
+            self.assertIn("_No transcript was provided._", (out / "transcript.md").read_text(encoding="utf-8"))
+            self.assertIn("Concise result.", (out / "summary.md").read_text(encoding="utf-8"))
+
+    def test_import_omits_empty_optional_sections_and_keeps_action_items(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = self.write_json(root / "meeting.json", transcript_only_meeting())
+            empty_sections_summary = summary()
+            empty_sections_summary.update(
+                {"entities": [], "links": [], "action_items": [], "verification": []}
+            )
+            summary_path = self.write_json(root / "summary.json", empty_sections_summary)
+            out = root / "meeting-folder"
+            args = mt.build_parser().parse_args(
+                ["import", str(source), "--out", str(out), "--summary", str(summary_path)]
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(args.func(args), 0)
+            rendered = (out / "summary.md").read_text(encoding="utf-8")
+            self.assertIn("## Context", rendered)
+            self.assertIn("## Open Questions", rendered)
+            self.assertNotIn("## Entities", rendered)
+            self.assertNotIn("## Links And Resources", rendered)
+            self.assertNotIn("## Verification", rendered)
+            self.assertIn("## Action Items\n\n_None._\n\n## Open Questions", rendered)
+
+    def test_import_uses_default_artifact_directory(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            value = transcript_only_meeting()
+            source = self.write_json(root / "meeting.json", value)
+            summary_path = self.write_json(root / "summary.json", summary())
+            out = root / "meeting-folder"
+            output = io.StringIO()
+            args = mt.build_parser().parse_args(
+                ["import", str(source), "--out", str(out), "--summary", str(summary_path)]
+            )
+            with redirect_stdout(output):
+                self.assertEqual(args.func(args), 0)
+            result = json.loads(output.getvalue())
+            expected = (out / ".meeting-transcript" / mt.artifact_key(value)).resolve()
+            self.assertEqual(Path(result["meeting_json"]), expected / "meeting.json")
+            self.assertEqual(Path(result["summary_json"]), expected / "summary.json")
+            self.assertTrue((out / "transcript.md").is_file())
+            self.assertTrue((out / "summary.md").is_file())
 
     def test_custom_bundle_and_template_overrides(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.skills/meeting-transcript/default-summary.schema.json",
+  "type": "object",
+  "required": [
+    "context",
+    "summary",
+    "key_points",
+    "decisions",
+    "entities",
+    "links",
+    "action_items",
+    "open_questions",
+    "verification"
+  ],
+  "properties": {
+    "context": {"type": "string"},
+    "summary": {"type": "string"},
+    "key_points": {"type": "array", "items": {"type": "string"}},
+    "decisions": {"type": "array", "items": {"type": "string"}},
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "role", "facts"],
+        "properties": {
+          "name": {"type": "string"},
+          "role": {"type": "string"},
+          "facts": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": false
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "target"],
+        "properties": {
+          "label": {"type": "string"},
+          "target": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "action_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["task", "owner", "due_date"],
+        "properties": {
+          "task": {"type": "string"},
+          "owner": {"type": "string"},
+          "due_date": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "open_questions": {"type": "array", "items": {"type": "string"}},
+    "verification": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

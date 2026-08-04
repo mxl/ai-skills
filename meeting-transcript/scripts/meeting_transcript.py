@@ -40,6 +40,13 @@ def load_json(path: Path) -> Any:
         raise MeetingError(f"invalid JSON in {path}: {exc}") from exc
 
 
+def read_bytes(path: Path) -> bytes:
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise MeetingError(f"cannot read {path}: {exc}") from exc
+
+
 def load_schema(path: Path) -> dict:
     schema = load_json(path)
     if not isinstance(schema, dict):
@@ -156,12 +163,7 @@ def summarization_text(meeting: dict) -> str:
             heading = item["title"] or "Untitled"
             lines.extend([f"\n### {heading}", item["text"]])
     if meeting["transcript"]:
-        lines.extend(["", "Transcript:"])
-        for item in meeting["transcript"]:
-            timing = " - ".join(value for value in (item["started_at"], item["ended_at"]) if value)
-            prefix = f"[{timing}] " if timing else ""
-            speaker = item["speaker"] or "Unknown"
-            lines.append(f"{prefix}{speaker}: {item['text']}")
+        lines.extend(["", "Transcript:", transcript_body(meeting)])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -292,14 +294,19 @@ def render_template(template: str, context: dict) -> str:
     return rendered.rstrip() + "\n"
 
 
-def transcript_body(meeting: dict) -> str:
-    chunks = []
+def grouped_transcript(meeting: dict) -> list[dict[str, str]]:
+    grouped: list[dict[str, str]] = []
     for item in meeting["transcript"]:
-        timing = " - ".join(value for value in (item["started_at"], item["ended_at"]) if value)
-        heading = f"[{timing}]" if timing else ""
         speaker = item["speaker"] or "Unknown"
-        prefix = " ".join(value for value in (heading, f"**{speaker}:**") if value)
-        chunks.append(f"{prefix} {item['text']}".lstrip())
+        if grouped and grouped[-1]["speaker"] == speaker:
+            grouped[-1]["text"] = grouped[-1]["text"].rstrip() + " " + item["text"].lstrip()
+            continue
+        grouped.append({"speaker": speaker, "text": item["text"]})
+    return grouped
+
+
+def transcript_body(meeting: dict) -> str:
+    chunks = [f"**{item['speaker']}:** {item['text']}" for item in grouped_transcript(meeting)]
     return "\n\n".join(chunks) if chunks else "_No transcript was provided._"
 
 
@@ -448,6 +455,7 @@ def prepare_command(args) -> int:
 
 def import_command(args) -> int:
     source_path = Path(args.meeting).expanduser().resolve()
+    source_bytes = read_bytes(source_path)
     meeting = validate_meeting(load_json(source_path))
     bundle = resolve_bundle(args.bundle)
     summary_schema = load_schema(bundle / "summary.schema.json")
@@ -473,18 +481,22 @@ def import_command(args) -> int:
         rendered = default_render(meeting, summary, options)
     out_dir = Path(args.out).expanduser().resolve()
     output_files = validate_outputs(rendered, out_dir)
+    transcript_json_path = (out_dir / "transcript.json").resolve()
+    if transcript_json_path in output_files:
+        raise MeetingError("renderer output conflicts with reserved path: transcript.json")
     root = Path(args.artifacts_dir).expanduser() if args.artifacts_dir else out_dir / ".meeting-transcript"
     _, meeting_path, summary_path = artifact_paths(meeting, root)
     files: dict[Path, bytes] = {
         meeting_path: canonical_bytes(meeting),
         summary_path: (json.dumps(summary, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+        transcript_json_path: source_bytes,
     }
     files.update({path: content.encode("utf-8") for path, content in output_files.items()})
     atomic_write_many(files)
     result = {
         "meeting_json": str(meeting_path),
         "summary_json": str(summary_path),
-        "outputs": [str(path) for path in output_files],
+        "outputs": [str(transcript_json_path), *(str(path) for path in output_files)],
     }
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")

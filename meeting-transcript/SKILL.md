@@ -106,7 +106,7 @@ Endpoint must implement OpenAI-compatible Chat Completions at `<base>/chat/compl
 
 ### Artifacts
 
-`--artifacts-dir` is a root. Script creates `<date>-<title-slug>-<source-hash12>/meeting.json` and `summary.json`, preventing shared-cache collisions. Default import root is `<meeting-folder>/.meeting-transcript/`. It may point outside project to shared cache. Rendered files remain under `--out`.
+`--artifacts-dir` is a root. Script creates `<date>-<title-slug>-<source-hash12>/meeting.json` and `summary.json`, preventing shared-cache collisions. Default import root is `<meeting-folder>/.meeting-transcript/`. It may point outside project to shared cache. Import also copies the validated canonical input byte-for-byte to `<meeting-folder>/transcript.json`; renderers cannot replace this reserved source file. Rendered files remain under `--out`.
 
 ## Entity Discovery
 
@@ -156,10 +156,11 @@ Default rendering uses:
 
 - `templates/meeting-transcript.md` for `transcript.md`.
 - selected summary bundle's `summary.md` for `summary.md`.
+- the validated canonical input for immutable `transcript.json`.
 
 Use `--transcript-template` or `--summary-template` to override either template. Use `--engine <plugin.py>` for trusted custom renderer defining `render(meeting, summary, options) -> Mapping[str, str]`.
 
-Default renderer rejects unresolved placeholders and always writes transcript and summary separately. For localized headings, select custom templates or custom bundle rather than editing rendered Markdown manually.
+Default renderer rejects unresolved placeholders and always writes transcript and summary separately. It groups adjacent transcript segments with the same canonical speaker and omits segment timestamps from both `transcript.md` and the summarization prompt; meeting-level start and end metadata remain. For localized headings, select custom templates or custom bundle rather than editing rendered Markdown manually.
 
 ## Building Canonical Meeting JSON
 
@@ -170,7 +171,7 @@ Populate canonical `meeting.json` before calling `prepare` or `import`:
 - Put supplied summary-like blocks or notes into `notes` as `{"title": "Provided summary", "text": "..."}`. Do not rewrite their content.
 - Populate `participants` and `resources` from source material. Use empty strings or arrays only when information is unavailable.
 
-Do not summarize, shorten, normalize, repair language, or remove garbled words from `raw`, `transcript`, or `notes`. The renderer creates `transcript.md` from this canonical input; never write or edit its body separately.
+Do not summarize, shorten, normalize, repair language, or remove garbled words from `raw`, `transcript`, or `notes`. `transcript.json` preserves the validated canonical input byte-for-byte. The renderer may group adjacent same-speaker segments in `transcript.md` without changing their text; never write or edit its body separately.
 
 ## Generating Summary From Transcript
 
@@ -323,6 +324,7 @@ When creating tasks:
 Report concisely:
 
 - path to `transcript.md`, if saved;
+- path to `transcript.json`, if saved;
 - path to `summary.md`, if saved;
 - contradictions found and how they were resolved;
 - unconfirmed claims that remain marked;
@@ -343,7 +345,7 @@ Before finishing, check:
 - Target entity was confirmed or unambiguous.
 - Target folder follows active project or vault instructions; no project-specific root path was assumed by the skill.
 - Date and slug are correct.
-- Transcript body was preserved verbatim.
+- Canonical transcript segments were preserved verbatim in `transcript.json`; renderer grouping changed only the Markdown presentation.
 - No placeholder transcript was written.
 - Summary links to `[[transcript]]`.
 - Summary claims are supported, marked unconfirmed, or resolved with the user.
@@ -354,7 +356,7 @@ Before finishing, check:
 - Todoist offer is always made in the final response.
 - Default renderer sets both `created:` and `updated:` to its render date on every `import`; do not assume repeated import preserves an original `created:` value.
 - Name/entity verification ran automatically (or its absence was explained, e.g. no reference source found), findings have confidence levels (confirmed / candidate / unresolved), and no matches were invented; summary JSON holds concise results without verbatim justification quotes unless requested.
-- Canonical `raw` and transcript segments remain verbatim; neither they nor rendered `transcript.md` were hand-edited for entity corrections.
+- Canonical `raw` and transcript segments remain verbatim in `transcript.json`; neither they nor rendered `transcript.md` were hand-edited for entity corrections.
 - Summary JSON `entities` covers every named entity with at least one concrete fact. Each fact is atomic and transcript-grounded; no entity was invented.
 - Discrepancy checks were scoped only to entities already resolved via cross-check, compared only directly comparable structured attributes, recorded in `verification` plus `open_questions`, and never edited reference data without explicit user confirmation.
 - Summary JSON `links` contains only concrete, retrievable resources, with provenance noted when found by the agent rather than stated in the transcript. The renderer omits its section when empty.

@@ -85,9 +85,38 @@ class SchemaAndPromptTests(unittest.TestCase):
         text = mt.summarization_text(meeting())
         self.assertIn("Mode: improve", text)
         self.assertIn("Alice <alice@example.test>", text)
-        self.assertIn("[2026-08-01T09:00:01Z - 2026-08-01T09:00:03Z] Alice", text)
+        self.assertIn("**Alice:** Keep this exact.\nSecond line.", text)
+        self.assertNotIn("[2026-08-01T09:00:01Z", text)
         self.assertIn("Keep this exact.\nSecond line.", text)
         self.assertNotIn("secret_duplicate", text)
+
+    def test_prompt_and_markdown_share_grouped_transcript_body(self):
+        value = meeting()
+        value["transcript"] = [
+            {
+                "started_at": "2026-08-01T09:00:01Z",
+                "ended_at": "2026-08-01T09:00:02Z",
+                "speaker": "Alice",
+                "text": "First. ",
+            },
+            {
+                "started_at": "2026-08-01T09:00:03Z",
+                "ended_at": "2026-08-01T09:00:04Z",
+                "speaker": "Alice",
+                "text": " Second.",
+            },
+            {
+                "started_at": "2026-08-01T09:00:05Z",
+                "ended_at": "2026-08-01T09:00:06Z",
+                "speaker": "Bob",
+                "text": "Reply.",
+            },
+        ]
+        body = "**Alice:** First. Second.\n\n**Bob:** Reply."
+
+        self.assertEqual(mt.transcript_body(value), body)
+        self.assertIn(f"Transcript:\n{body}", mt.summarization_text(value))
+        self.assertNotIn("2026-08-01T09:00:01Z", mt.transcript_body(value))
 
     def test_transcript_only_meeting_uses_generate_summary_mode(self):
         value = transcript_only_meeting()
@@ -183,8 +212,13 @@ class CommandTests(unittest.TestCase):
             self.assertTrue(Path(result["meeting_json"]).is_file())
             self.assertTrue(Path(result["summary_json"]).is_file())
             transcript = (out / "transcript.md").read_text(encoding="utf-8")
+            transcript_json = out / "transcript.json"
             rendered_summary = (out / "summary.md").read_text(encoding="utf-8")
             self.assertIn("Keep this exact.\nSecond line.", transcript)
+            self.assertIn("- Started: 2026-08-01T09:00:00Z", transcript)
+            self.assertNotIn("[2026-08-01T09:00:01Z", transcript)
+            self.assertEqual(transcript_json.read_bytes(), source.read_bytes())
+            self.assertIn(str(transcript_json.resolve()), result["outputs"])
             self.assertIn("| Alice | Lead | Owns delivery |", rendered_summary)
             self.assertIn("[[transcript]]", rendered_summary)
 
@@ -244,6 +278,7 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(Path(result["summary_json"]), expected / "summary.json")
             self.assertTrue((out / "transcript.md").is_file())
             self.assertTrue((out / "summary.md").is_file())
+            self.assertTrue((out / "transcript.json").is_file())
 
     def test_custom_bundle_and_template_overrides(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -331,6 +366,27 @@ class CommandTests(unittest.TestCase):
             self.assertEqual((out / "custom.txt").read_text(encoding="utf-8"), "Planning:Concise result.")
             with self.assertRaisesRegex(mt.MeetingError, "unsafe renderer output"):
                 mt.validate_outputs({"../bad": "x"}, out)
+
+    def test_renderer_cannot_overwrite_transcript_json(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            plugin = root / "renderer.py"
+            plugin.write_text(
+                "def render(meeting, summary, options):\n"
+                "    return {'transcript.json': 'changed'}\n",
+                encoding="utf-8",
+            )
+            source = self.write_json(root / "meeting.json", meeting())
+            summary_path = self.write_json(root / "summary.json", summary())
+            args = mt.build_parser().parse_args(
+                [
+                    "import", str(source), "--out", str(root / "out"),
+                    "--summary", str(summary_path), "--engine", str(plugin),
+                ]
+            )
+
+            with self.assertRaisesRegex(mt.MeetingError, "reserved path: transcript.json"):
+                args.func(args)
 
 
 class APITests(unittest.TestCase):

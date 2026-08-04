@@ -130,6 +130,7 @@ class SchemaAndPromptTests(unittest.TestCase):
         value = notes_only_meeting()
         text = mt.summarization_text(value)
         self.assertEqual(mt.infer_mode(value), "save")
+        self.assertEqual(mt.mode_reason(value), "notes_only")
         self.assertIn("Mode: save", text)
         self.assertIn("Provided notes:", text)
         self.assertNotIn("Transcript:", text)
@@ -148,6 +149,9 @@ class CommandTests(unittest.TestCase):
         path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
         return path
 
+    def test_script_is_source_agnostic(self):
+        self.assertNotIn("granola", SCRIPT.read_text(encoding="utf-8").casefold())
+
     def test_prepare_persists_source_and_returns_summary_path(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -165,6 +169,7 @@ class CommandTests(unittest.TestCase):
             self.assertTrue(str(Path(packet["meeting_json"]).parent).startswith(str(artifacts.resolve())))
             self.assertIn("summary_schema", packet)
             self.assertNotIn("secret_duplicate", packet["user_prompt"])
+            self.assertEqual(packet["mode_reason"], "transcript_and_notes")
 
     def test_prepare_transcript_only_returns_generate_summary_packet(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -176,11 +181,12 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(args.func(args), 0)
             packet = json.loads(output.getvalue())
             self.assertEqual(packet["mode"], "generate-summary")
+            self.assertEqual(packet["mode_reason"], "transcript_only")
             self.assertIn("Keep this exact.\nSecond line.", packet["user_prompt"])
             self.assertNotIn("Provided notes:", packet["user_prompt"])
             self.assertEqual(Path(packet["meeting_json"]).parent.parent, root.resolve())
 
-    def test_prepare_improve_packet_includes_notes_and_transcript(self):
+    def test_prepare_improve_packet_separates_draft_and_notes(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             value = meeting()
@@ -192,9 +198,62 @@ class CommandTests(unittest.TestCase):
                 self.assertEqual(args.func(args), 0)
             packet = json.loads(output.getvalue())
             self.assertEqual(packet["mode"], "improve")
-            self.assertIn("### Provided summary\nPrior claim.", packet["user_prompt"])
-            self.assertIn("Keep this exact.\nSecond line.", packet["user_prompt"])
-            self.assertNotIn("secret_duplicate", packet["user_prompt"])
+            self.assertEqual(packet["mode_reason"], "transcript_and_notes")
+            self.assertEqual(packet["user_prompt"], packet["draft_prompt"])
+            self.assertIn("Keep this exact.\nSecond line.", packet["draft_prompt"])
+            self.assertNotIn("Prior claim.", packet["draft_prompt"])
+            self.assertIn("### Provided summary\nPrior claim.", packet["reconcile_prompt"])
+            self.assertIn("Keep this exact.\nSecond line.", packet["reconcile_prompt"])
+            self.assertNotIn("secret_duplicate", json.dumps(packet))
+
+    def test_prepare_runs_external_adapter(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = self.write_json(root / "source.json", {"canonical": meeting()})
+            adapter = root / "adapter.py"
+            adapter.write_text(
+                "import argparse, json\n"
+                "from pathlib import Path\n"
+                "parser = argparse.ArgumentParser()\n"
+                "parser.add_argument('source')\n"
+                "parser.add_argument('--out', required=True)\n"
+                "parser.add_argument('--schema', required=True)\n"
+                "args = parser.parse_args()\n"
+                "payload = json.loads(Path(args.source).read_text())['canonical']\n"
+                "Path(args.out).write_text(json.dumps(payload))\n",
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            args = mt.build_parser().parse_args(
+                ["prepare", str(source), "--adapter", str(adapter)]
+            )
+            with redirect_stdout(output):
+                self.assertEqual(args.func(args), 0)
+            packet = json.loads(output.getvalue())
+            canonical = json.loads(Path(packet["meeting_json"]).read_text(encoding="utf-8"))
+            self.assertEqual(canonical, meeting())
+
+    def test_prepare_rejects_invalid_adapter_output(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = self.write_json(root / "source.json", {"value": 1})
+            adapter = root / "adapter.py"
+            adapter.write_text(
+                "import argparse\n"
+                "from pathlib import Path\n"
+                "parser = argparse.ArgumentParser()\n"
+                "parser.add_argument('source')\n"
+                "parser.add_argument('--out', required=True)\n"
+                "parser.add_argument('--schema', required=True)\n"
+                "args = parser.parse_args()\n"
+                "Path(args.out).write_text('{}')\n",
+                encoding="utf-8",
+            )
+            args = mt.build_parser().parse_args(
+                ["prepare", str(source), "--adapter", str(adapter)]
+            )
+            with self.assertRaisesRegex(mt.MeetingError, "meeting validation failed"):
+                args.func(args)
 
     def test_import_writes_artifacts_and_default_markdown(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -209,6 +268,7 @@ class CommandTests(unittest.TestCase):
             with redirect_stdout(output):
                 self.assertEqual(args.func(args), 0)
             result = json.loads(output.getvalue())
+            self.assertEqual(result["status"], "created")
             self.assertTrue(Path(result["meeting_json"]).is_file())
             self.assertTrue(Path(result["summary_json"]).is_file())
             transcript = (out / "transcript.md").read_text(encoding="utf-8")
@@ -219,8 +279,70 @@ class CommandTests(unittest.TestCase):
             self.assertNotIn("[2026-08-01T09:00:01Z", transcript)
             self.assertEqual(transcript_json.read_bytes(), source.read_bytes())
             self.assertIn(str(transcript_json.resolve()), result["outputs"])
+            self.assertEqual(result["transcript_segments"], 1)
+            self.assertEqual(result["speakers"], ["Alice"])
+            self.assertEqual(result["unknown_speakers"], 0)
+            self.assertEqual(result["action_items"], summary()["action_items"])
+            self.assertEqual(result["entity_count"], 1)
+            self.assertEqual(result["link_count"], 1)
             self.assertIn("| Alice | Lead | Owns delivery |", rendered_summary)
             self.assertIn("[[transcript]]", rendered_summary)
+
+    def test_identical_import_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = self.write_json(root / "meeting.json", meeting())
+            summary_path = self.write_json(root / "summary.json", summary())
+            out = root / "meeting-folder"
+
+            first_output = io.StringIO()
+            first_args = mt.build_parser().parse_args(
+                ["import", str(source), "--out", str(out), "--summary", str(summary_path)]
+            )
+            with redirect_stdout(first_output):
+                self.assertEqual(first_args.func(first_args), 0)
+            mtimes = {path: path.stat().st_mtime_ns for path in out.rglob("*") if path.is_file()}
+
+            second_output = io.StringIO()
+            second_args = mt.build_parser().parse_args(
+                ["import", str(source), "--out", str(out), "--summary", str(summary_path)]
+            )
+            with redirect_stdout(second_output):
+                self.assertEqual(second_args.func(second_args), 0)
+            result = json.loads(second_output.getvalue())
+
+            self.assertEqual(result["status"], "unchanged")
+            self.assertEqual(result["changed_outputs"], [])
+            self.assertEqual(
+                mtimes,
+                {path: path.stat().st_mtime_ns for path in out.rglob("*") if path.is_file()},
+            )
+
+    def test_changed_summary_writes_only_changed_output(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = self.write_json(root / "meeting.json", meeting())
+            summary_value = summary()
+            summary_path = self.write_json(root / "summary.json", summary_value)
+            out = root / "meeting-folder"
+            args = mt.build_parser().parse_args(
+                ["import", str(source), "--out", str(out), "--summary", str(summary_path)]
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(args.func(args), 0)
+
+            summary_value["summary"] = "Changed result."
+            self.write_json(summary_path, summary_value)
+            output = io.StringIO()
+            args = mt.build_parser().parse_args(
+                ["import", str(source), "--out", str(out), "--summary", str(summary_path)]
+            )
+            with redirect_stdout(output):
+                self.assertEqual(args.func(args), 0)
+            result = json.loads(output.getvalue())
+
+            self.assertEqual(result["status"], "updated")
+            self.assertEqual(result["changed_outputs"], [str((out / "summary.md").resolve())])
 
     def test_import_notes_only_renders_placeholder_transcript(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -404,13 +526,17 @@ class APITests(unittest.TestCase):
             return json.dumps(self.payload).encode()
 
     def test_api_request_and_response_validation(self):
-        captured = {}
+        captured = []
 
         def fake_urlopen(request, timeout):
-            captured["url"] = request.full_url
-            captured["authorization"] = request.headers["Authorization"]
-            captured["body"] = json.loads(request.data)
-            captured["timeout"] = timeout
+            captured.append(
+                {
+                    "url": request.full_url,
+                    "authorization": request.headers["Authorization"],
+                    "body": json.loads(request.data),
+                    "timeout": timeout,
+                }
+            )
             return self.Response({"choices": [{"message": {"content": json.dumps(summary())}}]})
 
         env = {
@@ -423,11 +549,16 @@ class APITests(unittest.TestCase):
         ):
             result = mt.api_summary(meeting(), mt.DEFAULT_BUNDLE)
         self.assertEqual(result, summary())
-        self.assertEqual(captured["url"], "https://api.example.test/v1/chat/completions")
-        self.assertEqual(captured["authorization"], "Bearer top-secret")
-        self.assertEqual(captured["body"]["response_format"]["type"], "json_schema")
-        self.assertTrue(captured["body"]["response_format"]["json_schema"]["strict"])
-        self.assertNotIn("secret_duplicate", captured["body"]["messages"][1]["content"])
+        self.assertEqual(len(captured), 2)
+        self.assertEqual(captured[0]["url"], "https://api.example.test/v1/chat/completions")
+        self.assertEqual(captured[0]["authorization"], "Bearer top-secret")
+        self.assertEqual(captured[0]["body"]["response_format"]["type"], "json_schema")
+        self.assertTrue(captured[0]["body"]["response_format"]["json_schema"]["strict"])
+        self.assertNotIn("Check this note.", captured[0]["body"]["messages"][1]["content"])
+        self.assertIn("Check this note.", captured[1]["body"]["messages"][1]["content"])
+        self.assertIn("Keep this exact.\nSecond line.", captured[1]["body"]["messages"][1]["content"])
+        self.assertIn("Draft summary:", captured[1]["body"]["messages"][1]["content"])
+        self.assertNotIn("secret_duplicate", json.dumps(captured))
 
     def test_import_api_is_one_command(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -452,12 +583,28 @@ class APITests(unittest.TestCase):
             )
             with mock.patch.dict(os.environ, env, clear=False), mock.patch.object(
                 mt.urllib.request, "urlopen", return_value=response
-            ), redirect_stdout(io.StringIO()):
+            ) as urlopen, redirect_stdout(io.StringIO()):
                 self.assertEqual(args.func(args), 0)
+            self.assertEqual(urlopen.call_count, 2)
             self.assertTrue((out / "transcript.md").is_file())
             self.assertTrue((out / "summary.md").is_file())
             self.assertEqual(len(list(cache.glob("*/meeting.json"))), 1)
             self.assertEqual(len(list(cache.glob("*/summary.json"))), 1)
+
+    def test_generate_summary_api_uses_one_request(self):
+        env = {
+            "MEETING_TRANSCRIPT_API_BASE": "https://api.example.test/v1",
+            "MEETING_TRANSCRIPT_API_KEY": "secret",
+            "MEETING_TRANSCRIPT_MODEL": "model-1",
+        }
+        response = self.Response(
+            {"choices": [{"message": {"content": json.dumps(summary())}}]}
+        )
+        with mock.patch.dict(os.environ, env, clear=False), mock.patch.object(
+            mt.urllib.request, "urlopen", return_value=response
+        ) as urlopen:
+            self.assertEqual(mt.api_summary(transcript_only_meeting(), mt.DEFAULT_BUNDLE), summary())
+        self.assertEqual(urlopen.call_count, 1)
 
     def test_api_refusal_and_invalid_assistant_json(self):
         env = {

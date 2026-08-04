@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import urllib.error
@@ -145,7 +146,20 @@ def infer_mode(meeting: dict) -> str:
     return "save"
 
 
-def summarization_text(meeting: dict) -> str:
+def mode_reason(meeting: dict) -> str:
+    if meeting["transcript"] and meeting["notes"]:
+        return "transcript_and_notes"
+    if meeting["transcript"]:
+        return "transcript_only"
+    return "notes_only"
+
+
+def summarization_text(
+    meeting: dict,
+    *,
+    include_notes: bool = True,
+    include_transcript: bool = True,
+) -> str:
     participants = ", ".join(display_participant(item) for item in meeting["participants"])
     lines = [
         f"Mode: {infer_mode(meeting)}",
@@ -157,25 +171,50 @@ def summarization_text(meeting: dict) -> str:
     if meeting["resources"]:
         lines.extend(["", "Resources:"])
         lines.extend(f"- {item['label']}: {item['target']}" for item in meeting["resources"])
-    if meeting["notes"]:
+    if include_notes and meeting["notes"]:
         lines.extend(["", "Provided notes:"])
         for item in meeting["notes"]:
             heading = item["title"] or "Untitled"
             lines.extend([f"\n### {heading}", item["text"]])
-    if meeting["transcript"]:
+    if include_transcript and meeting["transcript"]:
         lines.extend(["", "Transcript:", transcript_body(meeting)])
     return "\n".join(lines).rstrip() + "\n"
 
 
+def reconciliation_text(meeting: dict, draft: dict | None = None) -> str:
+    text = summarization_text(meeting, include_notes=True, include_transcript=True).rstrip()
+    draft_text = (
+        json.dumps(draft, ensure_ascii=False, indent=2)
+        if draft is not None
+        else "Use the draft summary produced from draft_prompt."
+    )
+    return (
+        f"{text}\n\nDraft summary:\n{draft_text}\n\n"
+        "Reconcile the draft with the provided notes against the transcript. Keep supported details, "
+        "record contradictions and unconfirmed material, and return the final summary JSON.\n"
+    )
+
+
 def prompt_packet(meeting: dict, bundle: Path) -> dict:
-    return {
+    packet = {
         "system_prompt": (bundle / "prompt.md").read_text(encoding="utf-8").strip(),
-        "user_prompt": summarization_text(meeting),
         "summary_schema": load_schema(bundle / "summary.schema.json"),
     }
+    if infer_mode(meeting) == "improve":
+        draft_prompt = summarization_text(meeting, include_notes=False, include_transcript=True)
+        packet.update(
+            {
+                "user_prompt": draft_prompt,
+                "draft_prompt": draft_prompt,
+                "reconcile_prompt": reconciliation_text(meeting),
+            }
+        )
+    else:
+        packet["user_prompt"] = summarization_text(meeting)
+    return packet
 
 
-def api_summary(meeting: dict, bundle: Path) -> dict:
+def api_completion(system_prompt: str, user_prompt: str, summary_schema: dict) -> dict:
     base = os.getenv("MEETING_TRANSCRIPT_API_BASE", "").strip()
     api_key = os.getenv("MEETING_TRANSCRIPT_API_KEY", "").strip()
     model = os.getenv("MEETING_TRANSCRIPT_MODEL", "").strip()
@@ -190,22 +229,21 @@ def api_summary(meeting: dict, bundle: Path) -> dict:
     ]
     if missing:
         raise MeetingError(f"missing API configuration: {', '.join(missing)}")
-    packet = prompt_packet(meeting, bundle)
     url = base.rstrip("/")
     if not url.endswith("/chat/completions"):
         url += "/chat/completions"
     body = {
         "model": model,
         "messages": [
-            {"role": "system", "content": packet["system_prompt"]},
-            {"role": "user", "content": packet["user_prompt"]},
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
         ],
         "response_format": {
             "type": "json_schema",
             "json_schema": {
                 "name": "meeting_summary",
                 "strict": True,
-                "schema": packet["summary_schema"],
+                "schema": summary_schema,
             },
         },
     }
@@ -238,8 +276,24 @@ def api_summary(meeting: dict, bundle: Path) -> dict:
         summary = json.loads(content)
     except json.JSONDecodeError as exc:
         raise MeetingError(f"summary API assistant content is invalid JSON: {exc}") from exc
-    validate(summary, packet["summary_schema"], "summary")
+    validate(summary, summary_schema, "summary")
     return summary
+
+
+def api_summary(meeting: dict, bundle: Path) -> dict:
+    packet = prompt_packet(meeting, bundle)
+    draft = api_completion(
+        packet["system_prompt"],
+        packet["user_prompt"],
+        packet["summary_schema"],
+    )
+    if infer_mode(meeting) != "improve":
+        return draft
+    return api_completion(
+        packet["system_prompt"],
+        reconciliation_text(meeting, draft),
+        packet["summary_schema"],
+    )
 
 
 def markdown_list(values: list) -> str:
@@ -418,6 +472,58 @@ def atomic_write_many(files: Mapping[Path, bytes]) -> None:
         raise
 
 
+def sha256_bytes(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def changed_files(files: Mapping[Path, bytes]) -> dict[Path, bytes]:
+    changed: dict[Path, bytes] = {}
+    for path, content in files.items():
+        try:
+            existing = path.read_bytes()
+        except FileNotFoundError:
+            changed[path] = content
+            continue
+        except OSError as exc:
+            raise MeetingError(f"cannot read {path}: {exc}") from exc
+        if sha256_bytes(existing) != sha256_bytes(content):
+            changed[path] = content
+    return changed
+
+
+def load_prepared_meeting(source_path: Path, adapter_value: str | None) -> dict:
+    if not adapter_value:
+        return validate_meeting(load_json(source_path))
+
+    adapter = Path(adapter_value).expanduser().resolve()
+    if not adapter.is_file():
+        raise MeetingError(f"adapter does not exist: {adapter}")
+    with tempfile.TemporaryDirectory(prefix="meeting-transcript-adapter-") as temp:
+        output_path = Path(temp) / "meeting.json"
+        command = [
+            sys.executable,
+            str(adapter),
+            str(source_path),
+            "--out",
+            str(output_path),
+            "--schema",
+            str(MEETING_SCHEMA),
+        ]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=120, check=False)
+        except subprocess.TimeoutExpired as exc:
+            raise MeetingError(f"adapter timed out after {exc.timeout} seconds: {adapter}") from exc
+        except OSError as exc:
+            raise MeetingError(f"cannot run adapter {adapter}: {exc}") from exc
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise MeetingError(f"adapter failed ({result.returncode}): {detail[:500]}")
+        if not output_path.is_file():
+            raise MeetingError(f"adapter did not create canonical output: {output_path}")
+        meeting = validate_meeting(load_json(output_path))
+    return meeting
+
+
 def resolved_assets(args, bundle: Path) -> tuple[Path, Path]:
     transcript = resolve_template(
         getattr(args, "transcript_template", None),
@@ -434,7 +540,7 @@ def resolved_assets(args, bundle: Path) -> tuple[Path, Path]:
 
 def prepare_command(args) -> int:
     source_path = Path(args.meeting).expanduser().resolve()
-    meeting = validate_meeting(load_json(source_path))
+    meeting = load_prepared_meeting(source_path, args.adapter)
     bundle = resolve_bundle(args.bundle)
     root = Path(args.artifacts_dir).expanduser() if args.artifacts_dir else source_path.parent
     directory, meeting_path, summary_path = artifact_paths(meeting, root)
@@ -443,6 +549,7 @@ def prepare_command(args) -> int:
     packet.update(
         {
             "mode": infer_mode(meeting),
+            "mode_reason": mode_reason(meeting),
             "artifact_directory": str(directory),
             "meeting_json": str(meeting_path),
             "summary_json": str(summary_path),
@@ -492,11 +599,30 @@ def import_command(args) -> int:
         transcript_json_path: source_bytes,
     }
     files.update({path: content.encode("utf-8") for path, content in output_files.items()})
-    atomic_write_many(files)
+    target_paths = [transcript_json_path, *output_files]
+    target_existed = any(path.exists() for path in target_paths)
+    changed = changed_files(files)
+    if changed:
+        atomic_write_many(changed)
+    changed_outputs = [str(path) for path in target_paths if path in changed]
+    status = "unchanged" if not changed else ("updated" if target_existed else "created")
+    speakers = list(dict.fromkeys((item["speaker"] or "Unknown") for item in meeting["transcript"]))
+    unknown_speakers = sum(
+        1 for item in meeting["transcript"] if not item["speaker"] or item["speaker"].casefold() == "unknown"
+    )
     result = {
+        "status": status,
         "meeting_json": str(meeting_path),
         "summary_json": str(summary_path),
-        "outputs": [str(transcript_json_path), *(str(path) for path in output_files)],
+        "outputs": [str(path) for path in target_paths],
+        "changed_outputs": changed_outputs,
+        "transcript_segments": len(meeting["transcript"]),
+        "speakers": speakers,
+        "unknown_speakers": unknown_speakers,
+        "action_items": summary.get("action_items", []) if isinstance(summary, dict) else [],
+        "entity_count": len(summary.get("entities", [])) if isinstance(summary.get("entities", []), list) else 0,
+        "link_count": len(summary.get("links", [])) if isinstance(summary.get("links", []), list) else 0,
+        "warnings": [],
     }
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")
@@ -511,6 +637,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("meeting")
     prepare.add_argument("--bundle")
     prepare.add_argument("--artifacts-dir")
+    prepare.add_argument("--adapter")
     prepare.set_defaults(func=prepare_command)
 
     import_parser = subparsers.add_parser("import", help="summarize and render a meeting")

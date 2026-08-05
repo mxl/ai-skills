@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.skills/meeting-transcript/meeting.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "raw",
+    "source",
+    "title",
+    "started_at",
+    "ended_at",
+    "participants",
+    "transcript",
+    "notes",
+    "resources"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "raw": {"type": "object"},
+    "source": {"type": "string"},
+    "title": {"type": "string"},
+    "started_at": {"type": "string"},
+    "ended_at": {"type": "string"},
+    "participants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "email"],
+        "properties": {
+          "name": {"type": "string"},
+          "email": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "transcript": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["started_at", "ended_at", "speaker", "text"],
+        "properties": {
+          "started_at": {"type": "string"},
+          "ended_at": {"type": "string"},
+          "speaker": {"type": "string"},
+          "text": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["title", "text"],
+        "properties": {
+          "title": {"type": "string"},
+          "text": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "target"],
+        "properties": {
+          "label": {"type": "string"},
+          "target": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

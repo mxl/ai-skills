@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "raw": {
+    "meeting": {
+      "id": 274,
+      "title": "Atlas delivery sync",
+      "meeting_app": "zoom"
+    },
+    "transcript": [
+      {
+        "id": 901,
+        "speakerName": "Dana",
+        "transcript": "The migration rehearsal is approved.",
+        "capturedAt": "2026-08-02T09:00:10Z"
+      }
+    ]
+  },
+  "source": "screenpipe",
+  "title": "Atlas delivery sync",
+  "started_at": "2026-08-02T09:00:00Z",
+  "ended_at": "2026-08-02T09:30:00Z",
+  "participants": [
+    {"name": "Dana", "email": "dana@example.test"}
+  ],
+  "transcript": [
+    {
+      "started_at": "2026-08-02T09:00:10Z",
+      "ended_at": "",
+      "speaker": "Dana",
+      "text": "The migration rehearsal is approved."
+    }
+  ],
+  "notes": [
+    {"title": "Screenpipe note", "text": "Target: projects/atlas"}
+  ],
+  "resources": [
+    {"label": "Screenpipe meeting 274", "target": "screenpipe://meeting/274"}
+  ]
+}

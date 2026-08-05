@@ -200,7 +200,7 @@ class CLITests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("same output path", result.stderr)
 
-    def test_output_is_accepted_by_meeting_transcript_prepare(self):
+    def test_output_is_accepted_by_meeting_transcript_import(self):
         with tempfile.TemporaryDirectory() as temp:
             directory = Path(temp)
             source = self.write_fixture(directory, "meeting.json", source_meeting())
@@ -208,24 +208,27 @@ class CLITests(unittest.TestCase):
             self.assertEqual(export_result.returncode, 0, export_result.stderr)
 
             canonical = directory / "meeting.meeting-transcript.json"
-            prepare_script = ROOT.parent / "meeting-transcript" / "scripts" / "meeting_transcript.py"
-            prepare_result = subprocess.run(
+            import_script = ROOT.parent / "meeting-transcript" / "scripts" / "meeting_transcript.py"
+            meeting_folder = directory / "meeting-folder"
+            import_result = subprocess.run(
                 [
                     sys.executable,
-                    str(prepare_script),
-                    "prepare",
+                    str(import_script),
+                    "import",
                     str(canonical),
-                    "--artifacts-dir",
-                    str(directory / "artifacts"),
+                    "--out",
+                    str(meeting_folder),
                 ],
                 text=True,
                 capture_output=True,
                 check=False,
             )
-            self.assertEqual(prepare_result.returncode, 0, prepare_result.stderr)
-            packet = json.loads(prepare_result.stdout)
-            self.assertEqual(packet["mode"], "improve")
-            self.assertTrue(Path(packet["meeting_json"]).exists())
+            self.assertEqual(import_result.returncode, 0, import_result.stderr)
+            report = json.loads(import_result.stdout)
+            self.assertEqual(report["mode"], "improve")
+            self.assertEqual(report["next_phase"], "summarize")
+            self.assertTrue((meeting_folder / "transcript.json").exists())
+            self.assertFalse((meeting_folder / "transcript.md").exists())
 
 
 if __name__ == "__main__":

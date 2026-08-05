@@ -1,102 +1,20 @@
 [
-  {
-    "query": "Save this pasted meeting transcript under projects/atlas and generate a verified summary. Me: We approved the migration. Them: I will send the checklist Friday.",
-    "should_trigger": true
-  },
-  {
-    "query": "Сохрани транскрипт созвона с Павлом в Obsidian и выдели решения и задачи. Текст начинается с Me: и Them:.",
-    "should_trigger": true
-  },
-  {
-    "query": "Compare prior-summary.md with the full transcript in atlas-review.md, correct unsupported meeting claims, and save both transcript.md and summary.md.",
-    "should_trigger": true
-  },
-  {
-    "query": "Вот заметки со стендапа без расшифровки: API тормозит, Ирина проверит p95 к пятнице. Залогируй встречу в areas/operations.",
-    "should_trigger": true
-  },
-  {
-    "query": "Import screenpipe-output.meeting-transcript.json into the Atlas project meeting folder and render the meeting notes.",
-    "should_trigger": true
-  },
-  {
-    "query": "Attach yesterday's investor meeting transcript to the Northstar opportunity, summarize commitments, and show follow-ups.",
-    "should_trigger": true
-  },
-  {
-    "query": "I have two Atlas folders in my vault. Save this roadmap meeting transcript to the right one, but ask me before writing if the target is ambiguous.",
-    "should_trigger": true
-  },
-  {
-    "query": "Process this meeting transcript and offer to create Todoist tasks after you show me the action-item table.",
-    "should_trigger": true
-  },
-  {
-    "query": "The meeting transcript says Alce Smth and Alice Smit. Cross-check our org reference, preserve the source wording, and save a verified summary.",
-    "should_trigger": true
-  },
-  {
-    "query": "Приведи в порядок саммари встречи, сверив каждое существенное утверждение с приложенным транскриптом.",
-    "should_trigger": true
-  },
-  {
-    "query": "Log these 1:1 notes under the person's existing vault folder and keep unknown owners or due dates explicit.",
-    "should_trigger": true
-  },
-  {
-    "query": "Meeting Title: Security review\nDate: 2026-08-02\nMe: Audit starts next week.\nThem: Agreed. Save and summarize this.",
-    "should_trigger": true
-  },
-  {
-    "query": "Import Granola transcripts into my Obsidian vault. Discover exported transcripts first and ask before fetching additional meetings.",
-    "should_trigger": true
-  },
-  {
-    "query": "Process my interview notes for the Senior Product Manager opportunity at Acme and update the opportunity record.",
-    "should_trigger": false
-  },
-  {
-    "query": "Find all Screenpipe meetings from last week containing Atlas and export their raw transcripts, but do not save anything to my vault.",
-    "should_trigger": false
-  },
-  {
-    "query": "Summarize the attached product requirements document into five bullets. It is not a meeting or transcript.",
-    "should_trigger": false
-  },
-  {
-    "query": "Create a Todoist task called Call the supplier tomorrow at 10am and label it operations.",
-    "should_trigger": false
-  },
-  {
-    "query": "Watch meeting-recording.mp4, transcribe the audio, and summarize the video with key frames.",
-    "should_trigger": false
-  },
-  {
-    "query": "Save this screenshot of a dashboard into my Obsidian inbox with a short caption.",
-    "should_trigger": false
-  },
-  {
-    "query": "Schedule a project kickoff meeting for Tuesday, invite alice@example.com, and add a Zoom link.",
-    "should_trigger": false
-  },
-  {
-    "query": "Update Alice Smith's department and title in the CRM using the attached org chart. There is no meeting material.",
-    "should_trigger": false
-  },
-  {
-    "query": "Review the Python Meeting class and its create_summary method for bugs and missing tests.",
-    "should_trigger": false
-  },
-  {
-    "query": "From this inline directory record, tell me Alice Smith's reporting line: Alice Smith | manager: Bob Chen | department: Engineering. This is not meeting material.",
-    "should_trigger": false
-  },
-  {
-    "query": "Archive this customer email thread in the vault and draft a reply; it contains no meeting notes.",
-    "should_trigger": false
-  },
-  {
-    "query": "Check whether meetingnotes.ai is available to register as a domain.",
-    "should_trigger": false
-  }
+  {"query": "$meeting import the latest Granola exports", "should_trigger": true},
+  {"query": "$meeting summarize meeting with Alex on May 21st", "should_trigger": true},
+  {"query": "$meeting summarize meetings/2026-08-01-platform-sync", "should_trigger": true},
+  {"query": "Import screenpipe-output.meeting-transcript.json into the Atlas meeting folder.", "should_trigger": true},
+  {"query": "Сохрани этот транскрипт созвона в проект и затем предложи сделать саммари.", "should_trigger": true},
+  {"query": "Summarize yesterday's investor meeting using our project context and verify suspicious names.", "should_trigger": true},
+  {"query": "Improve this prior meeting summary against the full transcript and collect contradictions in one question.", "should_trigger": true},
+  {"query": "Process this meeting transcript and offer Todoist tasks only after the action table.", "should_trigger": true},
+  {"query": "Import all existing Granola transcripts but do not summarize them automatically.", "should_trigger": true},
+  {"query": "Save these meeting notes without inventing dialogue.", "should_trigger": true},
+  {"query": "Process my interview notes for the Senior Product Manager opportunity.", "should_trigger": false},
+  {"query": "Fetch raw Screenpipe meetings from last week but do not import them.", "should_trigger": false},
+  {"query": "Summarize this product requirements document; it is not a meeting.", "should_trigger": false},
+  {"query": "Create a Todoist task called Call the supplier.", "should_trigger": false},
+  {"query": "Transcribe meeting-recording.mp4 and extract key frames.", "should_trigger": false},
+  {"query": "Schedule a kickoff meeting and invite alice@example.com.", "should_trigger": false},
+  {"query": "Update Alice's department in the CRM; there is no meeting material.", "should_trigger": false},
+  {"query": "Review the Python Meeting class for bugs.", "should_trigger": false}
 ]

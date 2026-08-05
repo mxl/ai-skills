@@ -1,18 +1,19 @@
 ---
-type: note
+type: meeting-summary
+source: {{source}}
+meeting_date: {{meeting_date}}
 created: {{created_date}}
 updated: {{created_date}}
-tags: []
-aliases: []
 ---
 
 # {{title}}
 
 ## Metadata
 
-- Meeting date: {{meeting_date}}
+- Started: {{started_at}}
+- Ended: {{ended_at}}
 - Participants: {{participants}}
-- Transcript: [[transcript]]
+- Canonical transcript: [transcript.json](./transcript.json)
 
 ## Context
 
@@ -32,6 +33,11 @@ aliases: []
 
 {{entities_section}}
 {{links_section}}
+{{transcript_findings_section}}
+{{user_resolutions_section}}
+{{reference_sources_section}}
+{{summarization_rules_section}}
+{{rule_suggestions_section}}
 ## Action Items
 
 {{action_items_table}}

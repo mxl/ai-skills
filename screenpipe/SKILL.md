@@ -104,11 +104,11 @@ this conversion-only workflow.
 
 ## Handoff
 
-After export, report that the canonical artifact is ready for the
-`meeting-transcript` skill. Invoke that skill only when the user separately asks
-to continue with import. It owns target-entity discovery, user confirmation,
-summary generation, artifact storage, templates, and vault rendering. Do not
-perform those steps in this skill.
+After export, report that the canonical artifact is ready for `$meeting import`.
+Invoke that workflow only when the user separately asks to continue. It owns
+target discovery and writes the selected meeting folder's sole canonical
+`transcript.json`. `$meeting summarize` separately owns project-aware summary
+generation. Do not perform those steps in this skill.
 
 Report both output paths. Meeting data may contain personal information; do not
 share it externally without explicit user approval.

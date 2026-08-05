@@ -1,22 +1,18 @@
 ---
 type: source
-created: {{created_date}}
-updated: {{created_date}}
+created: {{date}}
+updated: {{date}}
 source:
-  - {{source}}
+  - meeting transcript provided by user
 tags: []
 aliases: []
 ---
 
-# Transcript: {{title}}
+# {{transcript_title_prefix}}: {{title}}
 
-## Metadata
+## {{metadata_heading}}
 
-- Meeting date: {{meeting_date}}
-- Started: {{started_at}}
-- Ended: {{ended_at}}
-- Participants: {{participants}}
+- {{meeting_date_label}}: {{meeting_date}}
+- {{participants_label}}: {{participants}}
 
-## Transcript
-
-{{transcript_body}}
+## {{transcript_body_heading}}

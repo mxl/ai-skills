@@ -2,7 +2,7 @@
   {"query": "$meeting import the latest Granola exports", "should_trigger": true},
   {"query": "$meeting summarize meeting with Alex on May 21st", "should_trigger": true},
   {"query": "$meeting summarize meetings/2026-08-01-platform-sync", "should_trigger": true},
-  {"query": "Import screenpipe-output.meeting-transcript.json into the Atlas meeting folder.", "should_trigger": true},
+  {"query": "Import screenpipe-output.meeting-transcript.md into the Atlas meeting folder.", "should_trigger": true},
   {"query": "Сохрани этот транскрипт созвона в проект и затем предложи сделать саммари.", "should_trigger": true},
   {"query": "Summarize yesterday's investor meeting using our project context and verify suspicious names.", "should_trigger": true},
   {"query": "Improve this prior meeting summary against the full transcript and collect contradictions in one question.", "should_trigger": true},

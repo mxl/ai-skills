@@ -13,7 +13,7 @@ updated: {{created_date}}
 - Started: {{started_at}}
 - Ended: {{ended_at}}
 - Participants: {{participants}}
-- Canonical transcript: [transcript.json](./transcript.json)
+- Canonical transcript: [transcript.md](./transcript.md)
 
 ## Context
 

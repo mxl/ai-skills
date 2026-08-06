@@ -98,6 +98,20 @@ Inspect the transcript before drafting. Report a finding only when it changes or
 
 Use a short verbatim quotation plus speaker attribution as evidence. Do not create or expose synthetic segment IDs. A unique structured-reference match may be reference-confirmed and must name its exact source. Contextual or fuzzy interpretations require user confirmation. Unresolved findings must have a matching open question. Never rewrite the canonical transcript.
 
+#### Material-Question Gate
+
+Before writing `summary.md`, build a material-findings checklist. Stop the workflow and ask the user a consolidated batch of questions when any finding leaves uncertain or contradictory an item that affects:
+
+- a participant, person, role, entity, or contract party;
+- a decision, commitment, or action;
+- an owner, recipient, signer, or responsible team;
+- a deadline, meeting date, amount, price, or other numeric value;
+- a link, system, vendor, legal entity, or integration.
+
+Do not write `summary.md` while those questions are awaiting an answer. An `Open Questions` entry is not a substitute for asking the user. Only after the user answers, explicitly declines to resolve an item, or confirms that the ambiguity should remain can the item be recorded as `unresolved`.
+
+Do not silently choose between contradictory transcript text and project context. Project context can confirm a unique identity or terminology match, but it cannot override a contradictory transcript attribution, role, date, amount, decision, or contract detail without user confirmation. A direct `summarize` command does not waive this gate.
+
 ### 4. Two-Pass Summary
 
 First create an in-memory transcript-only draft. Then reconcile any separately supplied notes or prior summary and relevant project context:
@@ -108,7 +122,7 @@ First create an in-memory transcript-only draft. Then reconcile any separately s
 - decisions and action items require transcript support;
 - unstated owners and deadlines remain empty or unresolved.
 
-Ask correction, contradiction, owner, deadline, entity-attribute, and action-disposition questions in consolidated batches. Record answers in `User Resolutions`.
+Ask correction, contradiction, owner, deadline, entity-attribute, and action-disposition questions in consolidated batches before writing the summary. Record answers in `User Resolutions`. If there are no material questions, proceed. If there are any, do not proceed to the write step until the gate above is satisfied.
 
 ### 5. Project Summarization Rules
 
@@ -118,13 +132,13 @@ Record the rules path/hash in `Summarization Rules`. Suggest only durable improv
 
 ### 6. Write Summary
 
-Write `<meeting-folder>/summary.md` directly using the supplied summary template. Do not create a JSON draft or run a render/apply phase. The final Markdown must include all applicable template sections, use `[transcript.md](./transcript.md)`, and preserve reference/rules provenance.
+After the Material-Question Gate is satisfied, write `<meeting-folder>/summary.md` directly using the supplied summary template. Do not create a JSON draft or run a render/apply phase. The final Markdown must include all applicable template sections, use `[transcript.md](./transcript.md)`, and preserve reference/rules provenance.
 
 ## Todoist Follow-Up
 
 After writing the summary, show the complete action-item table before asking:
 
-`Создать Todoist-задачи: все / выборочно / пропустить?`
+`Create Todoist tasks: all / selected / skip?`
 
 If tasks are created, update their status and Todoist IDs/URLs directly in `summary.md`. Mark declined actions `skipped` and completed actions `resolved` when the user says so.
 

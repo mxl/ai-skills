@@ -3,20 +3,32 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Импортируй EPUB-книги из ~/Tmp в мой Obsidian vault так, чтобы AI-агент мог читать их по главам. Сохрани оригиналы, оглавление и изображения, но не делай конспект.",
-      "expected_output": "The skill confirms the EPUB inputs and vault destination, then uses the deterministic importer to create original EPUB copies, generated book/index Markdown, chapter files, and referenced media without summarizing source text.",
+      "prompt": "Импортируй эту EPUB-книгу в Obsidian. Перед импортом спроси, импортировать ли изображения, пропустить их или передать их AI-агенту для распознавания текста.",
+      "expected_output": "The skill asks the image-policy question before invoking the importer and applies the selected policy without summarizing source text.",
       "files": []
     },
     {
       "id": 2,
-      "prompt": "Повторно запусти импорт одной EPUB-книги после проверки: если SHA-256 не изменился, не переписывай производные файлы; если изменился, пересобери только ее каталог.",
-      "expected_output": "The skill uses the importer repeatability contract and reports whether the existing book was skipped or rebuilt based on SHA-256.",
+      "prompt": "Импортируй две EPUB-книги: для первой сохрани картинки, а для второй не импортируй их. Выбор должен быть отдельным для каждой книги.",
+      "expected_output": "The skill asks or records a separate image policy per book, creates media only for the import-images book, and leaves no image markers for the skipped book.",
       "files": []
     },
     {
       "id": 3,
-      "prompt": "У меня есть файл author_title.fb2.epub. Преврати его в удобный для агента Markdown-корпус в 05-sources/books и сохрани локальные картинки из XHTML.",
-      "expected_output": "The skill treats .fb2.epub as an EPUB archive, preserves the original, generates chapter Markdown and metadata, and extracts only referenced images.",
+      "prompt": "Для этой книги импортируй изображения, затем сделай handoff AI-агенту с промптом: распознать в изображениях текст на языке, определенном из текста книги. Замени ссылки распознанным текстом, а картинки без текста удали.",
+      "expected_output": "The skill first materializes images, performs an agent-selected OCR/vision handoff with the exact prompt, writes a complete image_text mapping, applies it deterministically, and removes processed media without binding to a specific OCR implementation.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Примени к уже импортированной книге неполную карту распознавания изображений. Не удаляй media и ссылки, если для одной картинки нет результата.",
+      "expected_output": "The post-processor validates mapping completeness before mutation and leaves the import-mode output intact on incomplete input.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "Повторно запусти импорт той же EPUB с тем же SHA-256, но с другим выбором обработки изображений.",
+      "expected_output": "The skill treats image mode as part of generated-output identity and rebuilds derived files when the mode changes even if the source hash is unchanged.",
       "files": []
     }
   ]

@@ -17,7 +17,7 @@ from datetime import date, datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote
 import xml.etree.ElementTree as ET
 
 
@@ -25,7 +25,8 @@ CONTAINER_NS = "urn:oasis:names:tc:opendocument:xmlns:container"
 OPF_NS = "http://www.idpf.org/2007/opf"
 DC_NS = "http://purl.org/dc/elements/1.1/"
 NCX_NS = "http://www.daisy.org/z3986/2005/ncx/"
-IMPORTER_VERSION = "3"
+IMPORTER_VERSION = "4"
+IMAGE_PATTERN = re.compile(r"!\[([^\]]*)\]\((\.\./media/[^)]+)\)")
 
 CYRILLIC = str.maketrans(
     {
@@ -169,17 +170,19 @@ class MarkdownParser(HTMLParser):
     BLOCK_TAGS = {"address", "article", "aside", "blockquote", "div", "h1", "h2", "h3", "h4", "h5", "h6", "li", "ol", "p", "pre", "section", "table", "tr", "ul"}
     SKIP_TAGS = {"head", "style", "script", "title", "meta", "link"}
 
-    def __init__(self, source_href: str, media_dir: Path, archive: zipfile.ZipFile, opf_dir: str):
+    def __init__(self, source_href: str, media_dir: Path | None, archive: zipfile.ZipFile, opf_dir: str, image_mode: str):
         super().__init__(convert_charrefs=True)
         self.source_href = source_href
         self.media_dir = media_dir
         self.archive = archive
         self.opf_dir = opf_dir
+        self.image_mode = image_mode
         self.lines: list[str] = []
         self.current: list[str] = []
         self.stack: list[tuple[str, str, bool]] = []
         self.skip_depth = 0
         self.image_files: list[str] = []
+        self.image_outputs: list[str] = []
         self.image_names: dict[str, str] = {}
         self.link_stack: list[str] = []
 
@@ -266,6 +269,8 @@ class MarkdownParser(HTMLParser):
     def add_image(self, src: str, alt: str) -> None:
         if not src:
             return
+        if self.image_mode == "skip":
+            return
         source_path = normalize_href(posixpath.join(posixpath.dirname(self.source_href), src))
         if source_path not in self.image_names:
             original_name = Path(source_path).name or "image"
@@ -278,6 +283,9 @@ class MarkdownParser(HTMLParser):
                 index += 1
             self.image_names[source_path] = candidate
             self.image_files.append(source_path)
+            self.image_outputs.append(candidate)
+            if self.media_dir is None:
+                return
             target = self.media_dir / candidate
             target.parent.mkdir(parents=True, exist_ok=True)
             archive_path = source_path if source_path.startswith(self.opf_dir + "/") else posixpath.join(self.opf_dir, source_path)
@@ -285,6 +293,7 @@ class MarkdownParser(HTMLParser):
                 target.write_bytes(self.archive.read(archive_path))
             except KeyError:
                 self.image_files.pop()
+                self.image_outputs.pop()
                 self.image_names.pop(source_path)
                 return
         self.current.append(f"![{alt}](../media/{self.image_names[source_path]})")
@@ -376,7 +385,169 @@ def read_manifest(path: Path) -> dict[str, Any] | None:
         return None
 
 
-def import_book(source: Path, books_root: Path, dry_run: bool = False) -> dict[str, Any]:
+def generated_output_complete(book_dir: Path, manifest: dict[str, Any]) -> bool:
+    if not (book_dir / "book.md").is_file():
+        return False
+    if manifest.get("image_mode", "import") == "skip" and (book_dir / "media").exists():
+        return False
+    for chapter in manifest.get("chapters", []):
+        chapter_path = book_dir / chapter["file"]
+        if not chapter_path.is_file():
+            return False
+        text = chapter_path.read_text(encoding="utf-8")
+        for _, link in IMAGE_PATTERN.findall(text):
+            if not (chapter_path.parent / link).is_file():
+                return False
+    return True
+
+
+def remove_duplicate_copies(book_dir: Path, manifest: dict[str, Any]) -> int:
+    """Remove older macOS-style copies left beside generated files."""
+    expected: set[Path] = {book_dir / chapter["file"] for chapter in manifest.get("chapters", [])}
+    expected_by_source = {
+        chapter.get("source_href"): book_dir / chapter["file"]
+        for chapter in manifest.get("chapters", [])
+        if chapter.get("source_href")
+    }
+    for chapter_path in expected.copy():
+        if chapter_path.is_file():
+            text = chapter_path.read_text(encoding="utf-8")
+            expected.update((chapter_path.parent / link).resolve() for _, link in IMAGE_PATTERN.findall(text))
+
+    removed = 0
+    for directory in (book_dir / "chapters", book_dir / "media"):
+        if not directory.is_dir():
+            continue
+        for path in directory.rglob("*"):
+            if not path.is_file() or path in expected:
+                continue
+            match = re.fullmatch(r"(.+) ([2-9][0-9]*)", path.stem)
+            if not match:
+                continue
+            canonical = path.with_name(f"{match.group(1)}{path.suffix}")
+            source_duplicate = False
+            if path.suffix.lower() == ".md":
+                try:
+                    source_match = re.search(r'^source_href:\s+"([^"]+)"$', path.read_text(encoding="utf-8"), re.MULTILINE)
+                except OSError:
+                    source_match = None
+                if source_match:
+                    mapped = expected_by_source.get(source_match.group(1))
+                    if mapped:
+                        canonical = mapped
+                        source_duplicate = True
+            if canonical not in expected or not canonical.is_file():
+                continue
+            try:
+                if path.stat().st_mtime > canonical.stat().st_mtime:
+                    continue
+            except OSError:
+                continue
+            try:
+                if source_duplicate:
+                    identical = True
+                elif path.suffix.lower() == ".md":
+                    identical = " ".join(path.read_text(encoding="utf-8").split()) == " ".join(canonical.read_text(encoding="utf-8").split())
+                else:
+                    identical = path.read_bytes() == canonical.read_bytes()
+            except OSError:
+                identical = False
+            if identical:
+                path.unlink()
+                removed += 1
+    return removed
+
+
+def set_book_frontmatter(path: Path, values: dict[str, str]) -> None:
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---\n"):
+        raise ValueError(f"Book file has no YAML frontmatter: {path}")
+    end = text.find("\n---\n", 4)
+    if end < 0:
+        raise ValueError(f"Book file has unterminated YAML frontmatter: {path}")
+    frontmatter = text[4:end]
+    for key, value in values.items():
+        rendered = f"{key}: {yaml_string(value)}"
+        pattern = re.compile(rf"^{re.escape(key)}:.*$", re.MULTILINE)
+        if pattern.search(frontmatter):
+            frontmatter = pattern.sub(rendered, frontmatter)
+        else:
+            frontmatter += f"\n{rendered}"
+    path.write_text("---\n" + frontmatter + "\n---\n" + text[end + len("\n---\n"):], encoding="utf-8")
+
+
+def apply_image_text(book_dir: Path, mapping_path: Path) -> dict[str, Any]:
+    manifest_path = book_dir / "manifest.json"
+    manifest = read_manifest(manifest_path)
+    if manifest is None:
+        raise ValueError(f"Book manifest is missing or invalid: {manifest_path}")
+    mapping_data = json.loads(mapping_path.read_text(encoding="utf-8"))
+    mapping = mapping_data.get("image_text") if isinstance(mapping_data, dict) else None
+    if not isinstance(mapping, dict):
+        raise ValueError("OCR mapping must be an object with an image_text object")
+
+    changes: dict[Path, str] = {}
+    referenced_media: set[Path] = set()
+    missing: set[str] = set()
+    replaced = 0
+    without_text = 0
+    for chapter in manifest.get("chapters", []):
+        chapter_path = book_dir / chapter["file"]
+        text = chapter_path.read_text(encoding="utf-8")
+
+        def replace_image(match: re.Match[str]) -> str:
+            nonlocal replaced, without_text
+            href = match.group(2)
+            media_path = (chapter_path.parent / href).resolve()
+            media_key = media_path.relative_to(book_dir.resolve()).as_posix()
+            referenced_media.add(media_path)
+            if media_key not in mapping:
+                missing.add(media_key)
+                return match.group(0)
+            value = mapping[media_key]
+            if value is None:
+                value = ""
+            if not isinstance(value, str):
+                raise ValueError(f"OCR mapping value must be text or empty: {media_key}")
+            value = value.strip()
+            if value:
+                replaced += 1
+                return value
+            without_text += 1
+            return ""
+
+        changes[chapter_path] = IMAGE_PATTERN.sub(replace_image, text)
+
+    if missing:
+        missing_list = ", ".join(sorted(missing))
+        raise ValueError(f"OCR mapping is incomplete; missing: {missing_list}")
+
+    for chapter_path, text in changes.items():
+        chapter_path.write_text(text, encoding="utf-8")
+    for media_path in referenced_media:
+        if media_path.is_file():
+            media_path.unlink()
+    media_dir = book_dir / "media"
+    if media_dir.is_dir() and not any(media_dir.iterdir()):
+        media_dir.rmdir()
+
+    for chapter in manifest.get("chapters", []):
+        chapter["images"] = []
+        chapter["media_files"] = []
+    manifest["image_mode"] = "ocr"
+    manifest["media"] = []
+    manifest["ocr"] = {
+        "status": "completed",
+        "images_processed": replaced + without_text,
+        "replaced": replaced,
+        "without_text": without_text,
+    }
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    set_book_frontmatter(book_dir / "book.md", {"image_mode": "ocr", "ocr_status": "completed"})
+    return manifest
+
+
+def import_book(source: Path, books_root: Path, image_mode: str = "import", dry_run: bool = False) -> dict[str, Any]:
     source_hash = sha256(source)
     with zipfile.ZipFile(source) as archive:
         if archive.testzip() is not None:
@@ -398,9 +569,10 @@ def import_book(source: Path, books_root: Path, dry_run: bool = False) -> dict[s
             and existing
             and existing.get("importer_version") == IMPORTER_VERSION
             and existing.get("sha256") == source_hash
-            and (book_dir / "book.md").is_file()
-            and chapter_dir.is_dir()
+            and existing.get("image_mode", "import") == image_mode
+            and generated_output_complete(book_dir, existing)
         ):
+            remove_duplicate_copies(book_dir, existing)
             return existing
 
         if dry_run:
@@ -418,7 +590,8 @@ def import_book(source: Path, books_root: Path, dry_run: bool = False) -> dict[s
         if media_dir.exists():
             shutil.rmtree(media_dir)
         chapter_dir.mkdir(parents=True)
-        media_dir.mkdir(parents=True)
+        if image_mode == "import":
+            media_dir.mkdir(parents=True)
         original_dir.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, original_dir / "book.epub")
 
@@ -432,7 +605,7 @@ def import_book(source: Path, books_root: Path, dry_run: bool = False) -> dict[s
                 xhtml = archive.read(archive_path)
             except KeyError as error:
                 raise ValueError(f"Spine item is missing from archive: {href}") from error
-            parser = MarkdownParser(href, media_dir, archive, opf_dir)
+            parser = MarkdownParser(href, media_dir if image_mode == "import" else None, archive, opf_dir, image_mode)
             parser.feed(xhtml.decode("utf-8", "replace"))
             content = parser.markdown()
             title = chapter_title(content, nav_titles.get(href, ""), href)
@@ -467,6 +640,7 @@ def import_book(source: Path, books_root: Path, dry_run: bool = False) -> dict[s
                     "file": f"chapters/{file_name}",
                     "source_href": href,
                     "images": parser.image_files,
+                    "media_files": parser.image_outputs,
                 }
             )
 
@@ -484,6 +658,7 @@ def import_book(source: Path, books_root: Path, dry_run: bool = False) -> dict[s
         "source_filename": source.name,
         "sha256": source_hash,
         "imported": source_date,
+        "image_mode": image_mode,
         "chapters": chapters,
         "media": sorted({image for chapter in chapters for image in chapter["images"]}),
     }
@@ -498,6 +673,7 @@ def import_book(source: Path, books_root: Path, dry_run: bool = False) -> dict[s
         "isbn": metadata["isbn"],
         "sha256": source_hash,
         "imported": source_date,
+        "image_mode": image_mode,
     }
     book_lines = [render_frontmatter(book_values), f"# {metadata['title']}", "", f"**Author:** {', '.join(metadata['authors'])}"]
     if metadata["publisher"]:
@@ -536,14 +712,20 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     import_parser.add_argument("--vault-root", type=Path, required=True)
     import_parser.add_argument("--input", type=Path, nargs="+", required=True)
     import_parser.add_argument("--output-dir", default="05-sources/books")
+    import_parser.add_argument("--image-mode", choices=("import", "skip"), default="import")
     import_parser.add_argument("--dry-run", action="store_true")
+    apply_parser = subparsers.add_parser("apply-image-text", help="Apply an agent-produced image text mapping")
+    apply_parser.add_argument("--book-dir", type=Path, required=True)
+    apply_parser.add_argument("--mapping", type=Path, required=True)
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    if args.command != "import":
-        return 2
+    if args.command == "apply-image-text":
+        result = apply_image_text(args.book_dir.expanduser().resolve(), args.mapping.expanduser().resolve())
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
     books_root = (args.vault_root / args.output_dir).resolve()
     results: list[dict[str, Any]] = []
     for source in args.input:
@@ -552,7 +734,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"Input file does not exist: {source}")
         if source.suffix.lower() != ".epub":
             raise SystemExit(f"Input is not an EPUB: {source}")
-        results.append(import_book(source, books_root, dry_run=args.dry_run))
+        results.append(import_book(source, books_root, image_mode=args.image_mode, dry_run=args.dry_run))
     if not args.dry_run:
         build_index(books_root)
     print(json.dumps({"books_root": str(books_root), "books": results, "dry_run": args.dry_run}, ensure_ascii=False, indent=2))

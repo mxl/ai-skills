@@ -1,0 +1,29 @@
+{
+  "skill_name": "telegram-import",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Скачай весь контент из Telegram-канала с обучающими публикациями в базу знаний, сохрани медиа и сделай Markdown для Obsidian.",
+      "expected_output": "Триггерит telegram-import, спрашивает параметры, предлагает расположение источника и не начинает импорт до подтверждения.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "Импортируй Telegram-группу с обсуждениями в vault.",
+      "expected_output": "Отказывается запускать importer и объясняет, что telegram-import работает только с каналами.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "Сохрани Telegram-канал одним Markdown-файлом, скачай изображения и видео, но сначала спроси про OCR и транскрибацию.",
+      "expected_output": "Выбирает single-file, встраивает media в Markdown через Obsidian embeds и задаёт отдельные вопросы про OCR и audio/video transcription.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "Импортируй канал через рабочий Telegram-аккаунт, а конфиг возьми из TELEGRAM_IMPORT_CONFIG.",
+      "expected_output": "Передаёт --account work и использует YAML config path override через TELEGRAM_IMPORT_CONFIG; не использует legacy config format.",
+      "files": []
+    }
+  ]
+}

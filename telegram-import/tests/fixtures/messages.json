@@ -1,0 +1,35 @@
+[
+  {
+    "message_id": 1,
+    "sent_at": "2026-01-01T10:00:00+00:00",
+    "text": "Первый пост",
+    "sender_id": "42",
+    "sender_name": "Channel",
+    "views": 10,
+    "telegram_url": "https://t.me/example/1",
+    "media": [
+      {"media_id": "1", "type": "photo", "original_name": "photo.jpg", "mime": "image/jpeg", "size_bytes": 10}
+    ]
+  },
+  {
+    "message_id": 2,
+    "sent_at": "2026-01-02T10:00:00+00:00",
+    "text": "Второй пост",
+    "sender_id": "42",
+    "sender_name": "Channel",
+    "views": 20,
+    "grouped_id": "album-1",
+    "telegram_url": "https://t.me/example/2",
+    "media": [
+      {"media_id": "2", "type": "video", "original_name": "video.mp4", "mime": "video/mp4", "size_bytes": 20},
+      {"media_id": "3", "type": "audio", "original_name": "audio.ogg", "mime": "audio/ogg", "size_bytes": 30}
+    ]
+  },
+  {
+    "message_id": 3,
+    "sent_at": "2026-01-03T10:00:00+00:00",
+    "text": "Ответ",
+    "reply_to": 1,
+    "telegram_url": "https://t.me/example/3"
+  }
+]

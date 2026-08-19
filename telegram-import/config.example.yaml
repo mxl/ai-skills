@@ -1,0 +1,27 @@
+# Copy this file to ./telegram-import.config.yaml or point
+# TELEGRAM_IMPORT_CONFIG at another YAML file.
+# Keep real credentials out of the vault and never commit this file with values.
+
+default_account: personal
+
+accounts:
+  personal:
+    api_id: 123456
+    api_hash: "replace-with-your-telegram-api-hash"
+    phone: "+70000000000"
+    session_path: "~/.config/opencode/telegram-import/personal.session"
+    # Or use a Telethon StringSession instead of session_path.
+    # session_string: "..."
+  work:
+    api_id: 234567
+    api_hash: "replace-with-your-second-telegram-api-hash"
+    phone: "+70000000001"
+    session_path: "~/.config/opencode/telegram-import/work.session"
+
+# Optional deterministic processors. Each command receives JSON on stdin and
+# must return plain text on stdout with exit code 0.
+handlers:
+  ocr:
+    local: ["/absolute/path/to/ocr-handler"]
+  transcription:
+    local: ["/absolute/path/to/transcription-handler"]

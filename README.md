@@ -10,6 +10,12 @@ The current collection focuses on document automation, PDFs, video summaries, me
 > [`pro-ledin-healthos`](https://github.com/ledin-pro/healthos)
 > (`pip install pro-ledin-healthos`).
 
+> The `ebook-import` skill has moved to its standalone repository at
+> [`ledin-pro/ebook-import`](https://github.com/ledin-pro/ebook-import) and is
+> published on PyPI as [`pro-ledin-ebook-import`](https://pypi.org/project/pro-ledin-ebook-import/)
+> (`pip install pro-ledin-ebook-import`). Configure OpenCode with the standalone
+> repository path to load its `skills/ebook-import/SKILL.md`.
+
 The `docx` and `pptx` skills share a common OOXML engine in [`common/ooxml/`](common/ooxml/) that provides ZIP-safety checks, XML utilities, and a generic unpack/pack/validate engine parameterized by format-specific profiles.
 
 ## Skills
@@ -22,7 +28,6 @@ The `docx` and `pptx` skills share a common OOXML engine in [`common/ooxml/`](co
 | [`video-summary`](video-summary/) | Summarize YouTube videos/playlists, web videos, local video files, streams, transcripts, audio, and frames. | Configurable presets, `yt-dlp` subtitle helper, `peepshow` orchestration, Fabric prompt routing |
 | [`meeting-transcript`](meeting-transcript/) | Save meeting transcripts and verified summaries into an Obsidian-style vault. | Storage rules, summary verification, action-item extraction guidance |
 | [`screenpipe`](screenpipe/) | Export detected Screenpipe meetings and full transcripts for `meeting-transcript`. | Authenticated local API fetcher, interactive range selection, raw + canonical JSON artifacts |
-| [`ebook-import`](ebook-import/) | Import EPUB books into an Obsidian-compatible Markdown corpus for AI-agent reading. | Deterministic standard-library importer, chapter splitting, metadata, referenced media, SHA-256 repeatability |
 | [`regru`](regru/) | Check exact domain names for availability through REG.RU API 2. | Self-contained REG.RU `domain/check` CLI with optional client SSL auth |
 | [`domain-check`](domain-check/) | Check exact domain availability for .ru, .рф, and other TLDs using public registry signals (RDAP/WHOIS). | No-API availability CLI with IDN support |
 | [`domain-suggest`](domain-suggest/) | Brainstorm brandable domain/name ideas for a startup, product, or project, then verify availability by delegating to `domain-check`. | Naming methodology + generation-technique references; reuses the no-API availability CLI |

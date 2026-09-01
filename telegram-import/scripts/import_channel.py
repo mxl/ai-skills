@@ -24,11 +24,12 @@ SKILL_HOME = Path.home() / ".config" / "opencode" / "telegram-import"
 DEFAULT_CONFIG_NAME = "telegram-import.config.yaml"
 CONFIG_ENV = "TELEGRAM_IMPORT_CONFIG"
 ACCOUNT_ENV = "TELEGRAM_IMPORT_ACCOUNT"
-FORBIDDEN_DIRS = {".git", ".venv", "node_modules", "private", "90-archive", ".trash"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"}
 VIDEO_EXTENSIONS = {".mp4", ".m4v", ".mov", ".webm", ".mkv"}
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".aac", ".ogg", ".oga", ".wav", ".flac"}
-OBSIDIAN_EMBED_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | {".pdf"}
+EMBEDDABLE_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS | {".pdf"}
+LINK_STYLES = ("obsidian", "markdown", "none")
+DEFAULT_LINK_STYLE = "obsidian"
 
 
 class ImportErrorBase(Exception):
@@ -223,11 +224,15 @@ def telegram_url(chat_id: int, username: str | None, message_id: int) -> str:
     return f"https://t.me/c/{internal_id}/{message_id}"
 
 
-def embed_for(relative_path: str, embed_prefix: str | None = None) -> str:
+def embed_for(relative_path: str, embed_prefix: str | None = None, link_style: str = DEFAULT_LINK_STYLE) -> str:
     embed_path = f"{embed_prefix.rstrip('/')}/{relative_path}" if embed_prefix else relative_path
-    suffix = Path(relative_path).suffix.casefold()
-    if suffix in OBSIDIAN_EMBED_EXTENSIONS:
+    if link_style == "none":
+        return embed_path
+    is_embeddable = Path(relative_path).suffix.casefold() in EMBEDDABLE_EXTENSIONS
+    if is_embeddable and link_style == "obsidian":
         return f"![[{embed_path}]]"
+    if is_embeddable and link_style == "markdown":
+        return f"![{Path(relative_path).stem}]({embed_path})"
     return f"[{Path(relative_path).name}]({embed_path})"
 
 
@@ -498,8 +503,8 @@ def empty_manifest(source: dict[str, Any], options: dict[str, Any], account: dic
     }
 
 
-def validate_output_dir(vault_root: Path, output_dir: Path) -> Path:
-    root = vault_root.expanduser().resolve()
+def validate_output_dir(root_dir: Path, output_dir: Path) -> Path:
+    root = root_dir.expanduser().resolve()
     target = output_dir.expanduser()
     if not target.is_absolute():
         target = root / target
@@ -507,9 +512,7 @@ def validate_output_dir(vault_root: Path, output_dir: Path) -> Path:
     try:
         target.relative_to(root)
     except ValueError as exc:
-        raise ImportErrorBase(f"Output directory must be inside vault root: {target}") from exc
-    if any(part in FORBIDDEN_DIRS for part in target.relative_to(root).parts):
-        raise ImportErrorBase(f"Output directory is forbidden: {target}")
+        raise ImportErrorBase(f"Output directory must be inside root directory: {target}") from exc
     return target
 
 
@@ -552,6 +555,7 @@ def ensure_media_record(
     post: dict[str, Any],
     output_dir: Path,
     embed_prefix: str | None = None,
+    link_style: str = DEFAULT_LINK_STYLE,
 ) -> dict[str, Any]:
     original = media.get("original_name") or f"{media.get('media_id', post['message_id'])}-{media.get('type', 'media')}"
     extension = Path(original).suffix
@@ -568,7 +572,7 @@ def ensure_media_record(
         "size_bytes": media.get("size_bytes"),
         "downloadable": media.get("downloadable", True),
         "relative_path": relative_path,
-        "embed": embed_for(relative_path, embed_prefix),
+        "embed": embed_for(relative_path, embed_prefix, link_style),
         "status": "pending",
         "_source": media.get("message_ref"),
     }
@@ -579,6 +583,7 @@ async def download_media_record(
     record: dict[str, Any],
     output_dir: Path,
     embed_prefix: str | None = None,
+    link_style: str = DEFAULT_LINK_STYLE,
 ) -> None:
     source = record.pop("_source", None)
     if source is None:
@@ -595,7 +600,7 @@ async def download_media_record(
     if downloaded_path.is_symlink() or not path.is_file() or not path.is_relative_to(output_dir.resolve()):
         raise ImportErrorBase(f"Telegram returned an unsafe media path: {downloaded_path}")
     record["relative_path"] = path.relative_to(output_dir).as_posix()
-    record["embed"] = embed_for(record["relative_path"], embed_prefix)
+    record["embed"] = embed_for(record["relative_path"], embed_prefix, link_style)
     record["size_bytes"] = path.stat().st_size
     record["sha256"] = sha256_file(path)
     record["status"] = "downloaded"
@@ -723,6 +728,7 @@ async def export_posts(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    link_style = options.get("link_style", DEFAULT_LINK_STYLE)
     source = source_from_entity(entity)
     manifest_path = output_dir / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else empty_manifest(source, options, account)
@@ -776,7 +782,7 @@ async def export_posts(
         processing_refs: list[dict[str, Any]] = []
         for media in post.get("media", []):
             manifest["counts"]["media_seen"] += 1
-            record = ensure_media_record(media, post, output_dir, embed_prefix)
+            record = ensure_media_record(media, post, output_dir, embed_prefix, link_style)
             if not record.get("downloadable", True):
                 clear_media_download_error(manifest, post["message_id"], record["media_id"])
                 record.pop("_source", None)
@@ -787,7 +793,7 @@ async def export_posts(
                 continue
             try:
                 if options.get("download_media"):
-                    await download_media_record(client, record, output_dir, embed_prefix)
+                    await download_media_record(client, record, output_dir, embed_prefix, link_style)
                     clear_media_download_error(manifest, post["message_id"], record["media_id"])
                     manifest["counts"]["media_downloaded"] += 1
                 else:
@@ -824,7 +830,7 @@ async def export_posts(
                     "type": kind,
                     "source_media_path": record["relative_path"],
                     "relative_path": result_path.relative_to(output_dir).as_posix(),
-                    "embed": embed_for(result_path.relative_to(output_dir).as_posix(), embed_prefix),
+                    "embed": embed_for(result_path.relative_to(output_dir).as_posix(), embed_prefix, link_style),
                     "handler": options[kind].get("handler"),
                     "language": options[kind].get("language"),
                     "created_at": datetime.now(UTC).isoformat(),
@@ -956,8 +962,10 @@ async def check_auth(account: AccountConfig) -> None:
 
 
 async def run_export(args: argparse.Namespace, config: Config, account: AccountConfig) -> None:
-    vault_root = Path(args.vault_root).expanduser().resolve()
-    output_dir = validate_output_dir(vault_root, Path(args.output_dir))
+    if args.root_dir is None:
+        raise ImportErrorBase("--root-dir is required (or its deprecated alias --vault-root).")
+    root_dir = Path(args.root_dir).expanduser().resolve()
+    output_dir = validate_output_dir(root_dir, Path(args.output_dir))
     if args.include_comments:
         raise ImportErrorBase("Discussion replies are not supported by this channel-only importer; use --exclude-comments.")
     options = {
@@ -967,6 +975,7 @@ async def run_export(args: argparse.Namespace, config: Config, account: AccountC
         "download_media": args.download_media,
         "layout": args.layout,
         "period_unit": args.period_unit,
+        "link_style": args.link_style,
         "ocr": {"enabled": bool(args.ocr_handler), "handler": args.ocr_handler, "language": args.ocr_language},
         "transcription": {"enabled": bool(args.transcription_handler), "handler": args.transcription_handler, "language": args.transcription_language},
     }
@@ -978,7 +987,7 @@ async def run_export(args: argparse.Namespace, config: Config, account: AccountC
         entity = await resolve_channel(client, args.channel)
         me = await client.get_me()
         account_identity = {"name": account.name, "telegram_account_id": getattr(me, "id", None)}
-        embed_prefix = output_dir.relative_to(vault_root).as_posix()
+        embed_prefix = output_dir.relative_to(root_dir).as_posix()
         manifest = await export_posts(
             client,
             entity,
@@ -995,6 +1004,17 @@ async def run_export(args: argparse.Namespace, config: Config, account: AccountC
         await client.disconnect()
 
 
+class _DeprecatedVaultRootAction(argparse.Action):
+    """Back-compat shim: --vault-root still works but writes to root_dir and warns."""
+
+    def __call__(self, parser_, namespace, values, option_string=None):
+        print(
+            "telegram-import: --vault-root is deprecated, use --root-dir instead",
+            file=sys.stderr,
+        )
+        setattr(namespace, "root_dir", values)
+
+
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(description=__doc__)
     commands = root.add_subparsers(dest="command", required=True)
@@ -1005,9 +1025,28 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument("--config", help="YAML config path; default: ./telegram-import.config.yaml")
         command.add_argument("--account", help="Account profile; priority: CLI > TELEGRAM_IMPORT_ACCOUNT > default_account")
     export.add_argument("--channel", required=True)
-    export.add_argument("--vault-root", required=True, type=Path)
+    export.add_argument(
+        "--root-dir",
+        dest="root_dir",
+        type=Path,
+        default=None,
+        help="Base directory that --output-dir must resolve inside (used to compute embed paths)",
+    )
+    export.add_argument(
+        "--vault-root",
+        type=Path,
+        action=_DeprecatedVaultRootAction,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     export.add_argument("--output-dir", required=True, type=Path)
     export.add_argument("--layout", choices=["single-file", "per-message", "period"], default="single-file")
+    export.add_argument(
+        "--link-style",
+        choices=list(LINK_STYLES),
+        default=DEFAULT_LINK_STYLE,
+        help="Embed syntax for downloaded media: obsidian (![[path]]), markdown (![alt](path)), or none (plain path)",
+    )
     export.add_argument("--period-unit", choices=["month", "quarter", "year"], default="month")
     export.add_argument("--from", dest="from_date")
     export.add_argument("--to", dest="to_date")

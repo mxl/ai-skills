@@ -25,14 +25,31 @@ class ImporterTests(unittest.TestCase):
         roots = [item for item in self.messages if importer.message_is_root(item)]
         self.assertEqual([item["message_id"] for item in roots], [1, 2])
 
-    def test_media_embeds_are_obsidian_embeds(self):
+    def test_media_embeds_default_to_obsidian_style(self):
         self.assertEqual(importer.embed_for("media/photo.jpg"), "![[media/photo.jpg]]")
         self.assertEqual(importer.embed_for("media/video.mp4"), "![[media/video.mp4]]")
         self.assertEqual(importer.embed_for("media/audio.ogg"), "![[media/audio.ogg]]")
         self.assertEqual(importer.embed_for("media/archive.zip"), "[archive.zip](media/archive.zip)")
         self.assertEqual(
-            importer.embed_for("media/video.mp4", "05-sources/telegram/example"),
-            "![[05-sources/telegram/example/media/video.mp4]]",
+            importer.embed_for("media/video.mp4", "sources/telegram/example"),
+            "![[sources/telegram/example/media/video.mp4]]",
+        )
+
+    def test_media_embeds_support_markdown_style(self):
+        self.assertEqual(
+            importer.embed_for("media/photo.jpg", link_style="markdown"),
+            "![photo](media/photo.jpg)",
+        )
+        self.assertEqual(
+            importer.embed_for("media/archive.zip", link_style="markdown"),
+            "[archive.zip](media/archive.zip)",
+        )
+
+    def test_media_embeds_support_no_style(self):
+        self.assertEqual(importer.embed_for("media/photo.jpg", link_style="none"), "media/photo.jpg")
+        self.assertEqual(
+            importer.embed_for("media/photo.jpg", "sources/telegram/example", link_style="none"),
+            "sources/telegram/example/media/photo.jpg",
         )
 
     def test_webpage_preview_is_not_downloadable_media(self):
@@ -159,6 +176,28 @@ handlers: {}
     def test_parser_accepts_account_on_commands(self):
         args = importer.parser().parse_args(["check-auth", "--account", "work"])
         self.assertEqual(args.account, "work")
+
+    def test_root_dir_flag_defaults_link_style_to_obsidian(self):
+        args = importer.parser().parse_args(
+            ["export", "--channel", "x", "--root-dir", ".", "--output-dir", "y"]
+        )
+        self.assertEqual(args.root_dir, Path("."))
+        self.assertEqual(args.link_style, "obsidian")
+
+    def test_deprecated_vault_root_alias_sets_root_dir(self):
+        args = importer.parser().parse_args(
+            ["export", "--channel", "x", "--vault-root", ".", "--output-dir", "y"]
+        )
+        self.assertEqual(args.root_dir, Path("."))
+
+    def test_link_style_flag_is_configurable(self):
+        args = importer.parser().parse_args(
+            [
+                "export", "--channel", "x", "--root-dir", ".", "--output-dir", "y",
+                "--link-style", "markdown",
+            ]
+        )
+        self.assertEqual(args.link_style, "markdown")
 
     def test_upsert_replaces_a_post_without_duplication(self):
         post = [item for item in self.messages if item["message_id"] == 1][0]

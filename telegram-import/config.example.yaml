@@ -1,6 +1,6 @@
 # Copy this file to ./telegram-import.config.yaml or point
 # TELEGRAM_IMPORT_CONFIG at another YAML file.
-# Keep real credentials out of the vault and never commit this file with values.
+# Keep real credentials out of the destination directory and never commit this file with values.
 
 default_account: personal
 

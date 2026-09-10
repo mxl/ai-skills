@@ -23,7 +23,7 @@ The initial executable action types are narrowly scoped uv cache pruning and Go 
 3. Show the plan. Explain that the owner command manages a dynamic cache scope, not an immutable list of file deletions. Do not promise the entire allocated size will be freed.
 4. Ask for this exact plan through the question tool. A question, empty response, decline or request for more information is not selection.
 5. After selection, pass the exact displayed digest to the executor. Do not derive a new plan or silently replace its target after approval. A new plan needs a new decision.
-6. Reconcile outcome. A blocked preflight performs no cleanup. An interrupted or partially completed action must not be retried automatically. Inspect the journal before any newly approved attempt.
+6. Reconcile each target independently. A blocked preflight performs no cleanup for that target, but must not block review or execution of unrelated approved plans. An interrupted or partially completed action must not be retried automatically. Inspect its journal before any newly approved attempt, then continue with other independent targets.
 
 A digest is an integrity and workflow binding, not a signature proving that a human clicked a UI. The assistant must still enforce the explicit selection step. Neither a saved plan nor its presence in a report authorizes execution.
 

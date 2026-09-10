@@ -109,7 +109,7 @@ An analysis without material candidates is incomplete. A proposal is not approva
 2. Record allocated and apparent size separately when available through guarded metadata inspection. Keep `estimated_reclaimable_bytes` unknown unless an owner-aware estimate exists. Allocated size is not exclusive APFS allocation or guaranteed recovery.
 3. Never sum a parent and its child, shared APFS capacity, Docker shared layers, clones, sparse files, or cloud placeholders.
 4. Treat sizes as estimates, not promised recovery. Keep `observed_available_delta_bytes` separate from owner-reported reclaim. It includes concurrent activity. Execute destructive groups sequentially to preserve per-group checkpoints; never sum overlapping/shared allocations.
-5. If available capacity changes by at least 1 GiB or 2% of the preflight available space without a workflow action, record concurrent activity. During read-only audit, continue and flag it. Immediately before a destructive or hard-to-reverse action, pause once, re-preflight, and require a new decision if material drift persists.
+5. If available capacity changes by at least 1 GiB or 2% of the preflight available space without a workflow action, record concurrent activity. During read-only audit, continue and flag it. Immediately before a destructive or hard-to-reverse action, pause that target once, re-preflight, and require a new decision for that target if material drift persists. Continue processing unrelated targets.
 6. For snapshot questions, use `tmutil listlocalsnapshots <mount-point>` and `diskutil apfs listSnapshots <resolved-device-or-volume>`. Snapshots are system-managed recovery assets, not routine junk. Consider deletion only as a separately approved advanced action under actual space pressure, without promising a retained size.
 
 ## Filesystem Audit
@@ -178,11 +178,11 @@ The cloud module is `PARTIAL` when a cloud root is discovered but item-level off
 7. If cloud verification is incomplete, finish all available guarded checks and name the exact unresolved requirement. Ask only for a concrete missing permission, account decision or scope choice; do not ask whether to perform an already requested safe audit. Keep unverified cloud data untouched while reporting other categories.
 8. Use separate confirmation groups for caches, cloud-local eviction, personal files, models, apps, app data, Docker, VMs/SDKs, packages, snapshots, and administrator handoffs.
 9. Each option must map to one concrete owner or exact target set. Include every path and material risk. Never use a broad option such as `delete all personal data`, `all app data`, `all models`, or `all volumes`.
-10. Execute only independently verified plans selected through `question`, not collector suggestions. Re-run exact target identity/scope, owner activity and capacity preflight immediately before every selected group. Execute groups sequentially. A question instead of a selection is not approval; changed targets or continued material drift require a new decision.
+10. Execute only independently verified plans selected through `question`, not collector suggestions. Re-run exact target identity/scope, owner activity and capacity preflight immediately before every selected group. Execute groups sequentially and independently: a blocked, unavailable, declined, or failed target must not prevent review, approval, or execution of unrelated targets. A question instead of a selection is not approval; changed targets or continued material drift require a new decision.
 11. Verify owner/service health, exact target state, Trash destination where applicable, and `df -k` after each group.
-12. Preserve executor outcomes `BLOCKED`, `PARTIAL`, `EXECUTED` and `UNCHANGED` with their reasons; do not turn an interrupted action into success. Other owner workflows may report `MOVED-TO-TRASH`, `BLOCKED-PRIVILEGE`, `BLOCKED-IN-USE`, `SKIPPED` or `NOT-FOUND`. If private raw output could not be removed, report retention and required reconciliation without displaying it.
+12. Preserve executor outcomes `BLOCKED`, `PARTIAL`, `EXECUTED` and `UNCHANGED` per target with their reasons; do not collapse independent targets into one fail-fast result or turn an interrupted action into success. Other owner workflows may report `MOVED-TO-TRASH`, `BLOCKED-PRIVILEGE`, `BLOCKED-IN-USE`, `SKIPPED` or `NOT-FOUND`. If private raw output could not be removed, report retention and required reconciliation without displaying it.
 
-For several independent low-risk caches, a multi-select question may include an `All listed low-risk caches` option and `None`. It must not include personal data, models, apps, Docker volumes, cloud deletion, snapshots, VMs, databases, or SDK state.
+For several independent low-risk caches, a multi-select question may include an `All listed low-risk caches` option and `None`. Expand the selection into separate plans and outcomes; if one cache is blocked, continue with every other approved cache. It must not include personal data, models, apps, Docker volumes, cloud deletion, snapshots, VMs, databases, or SDK state.
 
 ## Owner-Aware Procedures
 
@@ -237,6 +237,6 @@ Use the common inventory fields in `references/inventory-schema.md` so reports c
 
 ## Stop Conditions
 
-Stop before action when approval is missing; the exact target changed; the owner became active; cloud sync is incomplete; a target may contain unsynced data, credentials, active databases, shared model blobs, VM state, or service-linked volumes; required tooling is unavailable; or material capacity drift remains after one fresh preflight.
+Stop only the affected target before action when its approval is missing; the exact target changed; the owner became active; cloud sync is incomplete; it may contain unsynced data, credentials, active databases, shared model blobs, VM state, or service-linked volumes; its required tooling is unavailable; or its material capacity drift remains after one fresh preflight. Record the outcome and continue with unrelated targets.
 
-Do not turn uncertainty into deletion. Keep the candidate in the report, explain the missing evidence, and offer the narrow next audit or supported UI/tool needed to resolve it.
+Only explicit cancellation or loss of the no-hydration guard stops the overall cleanup process. Do not turn uncertainty into deletion. Keep the affected candidate in the report, explain the missing evidence, offer the narrow next audit or supported UI/tool needed to resolve it, and continue independent checks and actions.

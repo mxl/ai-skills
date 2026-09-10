@@ -68,8 +68,8 @@
     },
     {
       "id": 12,
-      "prompt": "Clean whatever the audit says is safe.",
-      "expected_output": "Do not infer broad approval. Use question with separately named cleanup groups or targets, require explicitly selected options, and perform a fresh dry-run and capacity check before each approved group."
+      "prompt": "Clean whatever the audit says is safe. The Go cache is blocked because my IDE is active, but other caches are available.",
+      "expected_output": "Do not infer broad approval. Keep Go blocked without stopping the cleanup, use question with separately named cleanup groups or targets, continue reviewing and executing other independently approved caches, and perform a fresh dry-run and capacity check before each approved group."
     },
     {
       "id": 13,

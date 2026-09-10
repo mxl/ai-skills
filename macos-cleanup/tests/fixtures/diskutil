@@ -1,0 +1,34 @@
+#!/bin/sh
+
+if [ -n "${DISKUTIL_LOG-}" ]; then
+  printf '%s\n' "$*" >> "$DISKUTIL_LOG"
+fi
+
+if [ "${1-}" = info ] && [ "${2-}" = -plist ]; then
+  cat <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>DeviceIdentifier</key>
+  <string>disk-test</string>
+  <key>MountPoint</key>
+  <string>/TestVolume</string>
+</dict>
+</plist>
+EOF
+  exit 0
+fi
+
+if [ "${1-}" = apfs ] && [ "${2-}" = listSnapshots ]; then
+  cat <<'EOF'
+Snapshot for test volume (1 found)
+|
++-- TEST
+    Name:        com.apple.TimeMachine.2099-01-01-000000.local
+    Purgeable:   Yes
+EOF
+  exit 0
+fi
+
+exit 1

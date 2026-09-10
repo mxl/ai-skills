@@ -1,0 +1,43 @@
+# Reviewed Cache Actions
+
+The contract, initial uv/Go adapters, executor and CLI have been integrated and tested on synthetic local fixtures. No real owner-cache deletion or live cloud-provider eviction was tested. Implementation status is tracked in the parent project's DAG; no audit candidate automatically becomes an approval.
+
+## Separation of commands
+
+Use `python3 <skill>/scripts/cleanup_actions.py --help` for syntax. Resolve `<skill>` to the actual installed skill directory; run from the user's active project.
+
+| Command | Purpose | Can invoke cleanup? |
+|---|---|---|
+| `review --adapter uv` | Version, configured cache, feature and writer evidence | No |
+| `prepare --adapter uv --output <new-private-plan>` | Capture a fresh scoped plan and digest | No |
+| `show --plan <private-plan>` | Show the reviewed scope, risks, expiry and digest | No |
+| `execute --plan <private-plan> --confirm-digest <exact-digest> --journal-dir <private-journal>` | Verify and dispatch the selected supported action | Yes, only after explicit user choice |
+| `cloud-metadata --root <exact-provider-root>` | Bounded metadata inventory, not eviction | No |
+
+The initial executable action types are narrowly scoped uv cache pruning and Go build-cache cleaning, subject to the installed-version adapter's checks. npm and Homebrew reviews do not imply executable support. Models, volumes, snapshots, apps, SDKs, personal files and cloud eviction are not generic cache actions.
+
+## Approval procedure
+
+1. Review owner evidence. Unsupported features, busy/unknown writers, incomplete visibility, unsupported links or centralized environments remain blockers; do not replace these checks with raw deletion.
+2. Prepare a new plan in private local storage. Existing files are refused. The plan includes exact target/tool identities, installed version, metadata fingerprint, dynamic owner-managed scope, fixed risk wording, creation and expiry times.
+3. Show the plan. Explain that the owner command manages a dynamic cache scope, not an immutable list of file deletions. Do not promise the entire allocated size will be freed.
+4. Ask for this exact plan through the question tool. A question, empty response, decline or request for more information is not selection.
+5. After selection, pass the exact displayed digest to the executor. Do not derive a new plan or silently replace its target after approval. A new plan needs a new decision.
+6. Reconcile outcome. A blocked preflight performs no cleanup. An interrupted or partially completed action must not be retried automatically. Inspect the journal before any newly approved attempt.
+
+A digest is an integrity and workflow binding, not a signature proving that a human clicked a UI. The assistant must still enforce the explicit selection step. Neither a saved plan nor its presence in a report authorizes execution.
+
+## Verification and limitations
+
+- The executor checks plan freshness, tool/target identity, owner evidence and capacity drift immediately before dispatch and uses only the trusted built-in command builder.
+- A journal reservation precedes mutation, preventing replay of the same plan even if the previous attempt was interrupted.
+- An owner command's success is not enough: postcheck must determine whether target metadata changed and report failed/incomplete verification.
+- Record allocated/logical measurements, unknown estimated reclaim and observed available-space delta separately. Concurrent writes can affect the last metric.
+- Process-scoped no-hydration protection remains enabled; it is not a sandbox for a malicious process running as the same user. Metadata fingerprints reduce stale-target risk but do not replace owner locks or eliminate all concurrency races.
+- A bounded capture may refuse large or symlink-containing caches. This is an explicit conservative limitation, not permission to rerun an unbounded scan or delete directly.
+- Known cloud namespaces are excluded from cache plans even when local files exist. Custom third-party sync locations require separate review; local availability alone does not authorize remote namespace deletion.
+- The cloud metadata command cannot prove sync/pin/conflict state or safe eviction by allocated bytes alone. All such items remain non-actionable until a provider-specific adapter supplies the missing evidence.
+
+## Safe development
+
+Use only fake owner executables/probes and temporary local targets in tests. A test of CLI forwarding alone does not prove executor validation; test the actual plan roundtrip, changed-target rejection and invalid-digest path separately. Native guard tests do not substitute for an instrumented File Provider integration test.

@@ -2,7 +2,7 @@
 name: macos-cleanup
 description: >-
   Audit and clean macOS storage safely and portably. Use whenever the user asks to clean a Mac, free disk space, find what uses storage, analyze the filesystem, remove junk or caches, inspect local Time Machine/APFS snapshots, review offline cloud files in iCloud Drive, Google Drive, Dropbox, OneDrive, Yandex Disk, or another File Provider, audit models/VMs/SDKs/Docker/app data, or uninstall named applications. Always discover capabilities and paths on the current Mac instead of assuming a username, disk identifier, Homebrew prefix, cloud account, application, or tool is present.
-compatibility: Requires macOS shell tools. Optional provider, package-manager, Docker, Xcode, Android, VM, and model-management tools are discovered at runtime.
+compatibility: Requires macOS, Python 3.10+ and native Darwin dataless policy support. No Python dependencies are installed. Optional provider and owner tools are discovered at runtime.
 ---
 
 # macOS Cleanup
@@ -20,7 +20,7 @@ Choose the narrowest mode that satisfies the request. A combined request may run
 | `cleanup` | clean my Mac, free space, remove junk | Full audit, dry run, exact confirmation groups, execution, verification, report |
 | `uninstall` | `uninstall <app-name-or-path> ...` | Target only the named apps; do not expand to unrelated cleanup |
 
-For `cleanup`, include filesystem, cache, GUI-app, and Homebrew/package audits. For `filesystem-audit`, do not force the expensive full removal audit unless the user asks what apps/packages to remove.
+For `cleanup`, include filesystem, cache, GUI-app, Homebrew/package, and cloud-offline audits. Start the cloud module in the same audit pass whenever any provider root is discovered; do not silently defer it. For `filesystem-audit`, do not force the expensive full removal audit unless the user asks what apps/packages to remove.
 
 ## Portability Contract
 
@@ -38,9 +38,40 @@ Before finishing a skill change, search production files for absolute user-home 
 
 ## Capability Discovery
 
-Run `scripts/audit-capabilities.sh` first when available. It emits JSONL records for capacity, APFS/Time Machine snapshots, and optional tool availability. Use `scripts/audit-paths.sh` for exact high-level paths and `scripts/audit-cloud.sh` for discovered cloud roots. Read `references/inventory-schema.md` before merging their records.
+For broad `cleanup`, run `scripts/audit-all.sh` from the active project, using its resolved absolute skill path. It delegates to the Python orchestrator, validates JSON records, supervises guarded process groups, preserves valid partial results and writes private reports. Use `--modules <comma-separated-list>` for a fresh subset run; this is not a complete cleanup audit. Read `references/inventory-schema.md` before consuming records.
 
-Scripts are read-only. A script result is evidence, not deletion approval. If a script fails or times out, retain completed records, mark the module `PARTIAL`, and state what was not measured.
+The existing shell modules are collectors, not safe standalone entry points. For a narrow filesystem collector, launch it through `python3 scripts/audit_runtime.py --guard-exec /bin/sh <collector> <arguments>` using resolved paths. No content searches, hashes, previews, or broad recursive `$HOME` scans are part of ordinary audit. Do not silently fall back to an unguarded collector if Python or the Darwin policy is unavailable.
+
+Audit scripts do not invoke cleanup commands. Owner CLI discovery can have incidental metadata/cache effects; do not describe this as an OS-wide read-only sandbox. If a module fails or times out, retain valid records and mark the scope `PARTIAL`. Do not replace a blocked module with an untracked, unguarded scan. `proposed_action` strings in older records are advice, never executable input or approval.
+
+## Implemented Scope
+
+| Area | Current implementation | Remaining limitation |
+|---|---|---|
+| Runtime | Process-scoped native no-hydration guard; supervised command groups | Not a security sandbox for hostile processes or an OS-wide download switch |
+| Orchestration | JSON validation, private fresh reports, module outcomes and coverage | Full cleanup includes categories not yet implemented |
+| Capacity/snapshots | Target-volume discovery and snapshot inventory | Snapshot presence gives no reclaimable-byte estimate |
+| Paths | Narrow allocated/apparent measurements | No automatic full-home content scan |
+| Caches | Measurement plus guarded version/writer review; plan adapters for uv and Go | npm/pnpm/Homebrew are review-only; unsupported versions, symlinks and unknown activity block plans |
+| Cloud | Root discovery automatically invokes bounded metadata inventory per root | Sync/pin/conflict/eviction remain unverified; no cloud mutation is implemented |
+| Execution | Separate digest-bound uv/Go executor with TTL, fresh preflight and single-use journal | No generic deletion, automatic retry, or automatic reconciliation; audit records never authorize actions |
+| Apps/packages/Docker/VM/SDK/models/duplicates | Requirements below describe the target workflow | Report missing coverage; do not claim these adapters already ran |
+
+Unit/fixture tests are not a live File Provider integration test or an agent benchmark. State which verification actually ran.
+
+## Reviewed Action CLI
+
+Use `python3 <skill>/scripts/cleanup_actions.py review --adapter <owner>` for fresh owner evidence. For a supported idle uv/Go target, `prepare --adapter <owner> --output <new-private-plan>` captures identity, scope, risk and a digest; `show --plan <plan>` displays the plan without executing it. These commands do not grant approval.
+
+Only after the user selects that exact plan through `question`, call `execute --plan <plan> --confirm-digest <displayed-digest> --journal-dir <private-journal>`. A newly prepared or changed plan requires a new choice. The executor rechecks expiry immediately before dispatch and blocks replay of a previously attempted digest, including interrupted attempts. A digest is a workflow binding, not proof that a human agreed; enforce the selection step.
+
+Review `references/cleanup-action-workflow.md` and `references/cache-adapter-sources.md` before use. The initial adapters have explicit version limits. uv requires an explicitly supported link mode; do not set environment variables merely to bypass a blocked review. Go clears inherited flags and external cache-program settings before its fixed build-cache-only command. Historical link relationships or shared environments cannot be inferred solely from the current environment.
+
+## No-Hydration Policy
+
+The runtime sets and verifies Darwin `IOPOL_MATERIALIZE_DATALESS_FILES_OFF` before launching collectors. The process-scoped setting prevents those processes from triggering dataless content downloads; it does not cancel existing transfers or affect unrelated applications. Failure to establish the policy blocks the scan.
+
+Metadata enumeration and payload reads are different operations. Apple's `du` source includes its own dataless safeguard; do not claim that `du` inherently downloads cloud files. Directory enumeration may require remote metadata, while content search such as `rg`, hashing and previews can request payload. An inaccessible dataless item is incomplete coverage, not permission to retry without protection. See `references/safety-runtime.md` for boundaries and tests.
 
 ## Action Matrix
 
@@ -75,15 +106,15 @@ An analysis without material candidates is incomplete. A proposal is not approva
 ## Measurement Rules
 
 1. Record `df -h` for display and `df -k` for exact capacity checkpoints on the target volume.
-2. Record allocated size and, for cloud/file-provider trees, apparent size. On macOS, `du -sh` estimates allocated blocks and `du -A -sh` estimates apparent size.
+2. Record allocated and apparent size separately when available through guarded metadata inspection. Keep `estimated_reclaimable_bytes` unknown unless an owner-aware estimate exists. Allocated size is not exclusive APFS allocation or guaranteed recovery.
 3. Never sum a parent and its child, shared APFS capacity, Docker shared layers, clones, sparse files, or cloud placeholders.
-4. Treat sizes as estimates, not promised recovery. `df -k` is the observed net capacity change during an action interval.
+4. Treat sizes as estimates, not promised recovery. Keep `observed_available_delta_bytes` separate from owner-reported reclaim. It includes concurrent activity. Execute destructive groups sequentially to preserve per-group checkpoints; never sum overlapping/shared allocations.
 5. If available capacity changes by at least 1 GiB or 2% of the preflight available space without a workflow action, record concurrent activity. During read-only audit, continue and flag it. Immediately before a destructive or hard-to-reverse action, pause once, re-preflight, and require a new decision if material drift persists.
-6. For snapshot questions, use `tmutil listlocalsnapshots <mount-point>` for Time Machine snapshots and `diskutil apfs listSnapshots <resolved-device-or-volume>` for the exact APFS volume. Snapshot presence does not prove retained size.
+6. For snapshot questions, use `tmutil listlocalsnapshots <mount-point>` and `diskutil apfs listSnapshots <resolved-device-or-volume>`. Snapshots are system-managed recovery assets, not routine junk. Consider deletion only as a separately approved advanced action under actual space pressure, without promising a retained size.
 
 ## Filesystem Audit
 
-Build a high-level topology before drilling down. Start with the target volume, `$HOME`, `/Applications`, and discovered high-level children. Then inspect only material roots or roots the user requested.
+Build a high-level topology before drilling down. Discover the target volume and home location without recursively traversing the entire home. Start with narrow local roots and expand only material categories under the guard. Do not assume `--target` for capacity authorizes content inspection at that path.
 
 Cover these classes when present:
 
@@ -104,12 +135,14 @@ Do not use access time as proof of use. Prefer owner metadata, current processes
 
 ## Cloud Offline Audit
 
-Discover providers dynamically. Measure each domain separately and record both allocated and apparent bytes. A large apparent/allocated gap suggests placeholders but does not prove each item's state.
+Provider discovery automatically invokes `cloud_metadata_collect.py` for each root under the guard: up to 1000 entries, depth 3 and a 10-second cooperative traversal budget per root, within the outer module timeout. Dataless directories are skipped rather than hydrated. The explicit `cloud-metadata --root <root>` CLI supports bounded follow-up, with hard limits of 10000 entries, depth 64 and 60 seconds. A single blocking kernel metadata call may outlast a cooperative budget; the outer audit runtime provides process-level timeout/cancellation.
+
+Public item IDs use per-run HMAC, not predictable filename hashes; do not treat them as stable cross-run identities or executable paths. Missing measurements remain unknown, with known lower bounds separately labelled. Complete enumeration is not complete cloud verification: sync, pins, conflicts and remote-preserving eviction still need provider-specific evidence. Do not ask the user to request an already authorized safe metadata audit again.
 
 For every discovered provider in `cloud-offline-audit` and `cleanup`:
 
 1. Enumerate item-level offline copies instead of stopping at provider-root totals. Record the provider/domain, exact target, allocated bytes, logical bytes, sync state, local state, and evidence source.
-2. Research the provider-specific eviction mechanism available on the current Mac. For iCloud Drive, prefer an exact `brctl evict "<path>"` call after approval and preflight, even when `brctl help` does not list `evict` or `brctl evict --help` exits with a usage error; those observations do not prove the subcommand is unavailable. If the real exact-target call is unavailable or fails without changing state, fall back to Foundation `FileManager.evictUbiquitousItem(at:)`, then Finder `Remove Download`. For other providers, prefer a supported `Free up space` or `Make online-only` CLI, API, documented client action, or Finder action.
+2. Research the provider-specific eviction mechanism available on the current Mac. Prefer documented Finder/provider Remove Download or online-only semantics with verified API access. File Provider extension APIs are not universal administrative access to every domain. `brctl evict` is private/version-dependent; missing help does not prove absence, but neither is it a stable public contract. Do not use a real mutation merely as a capability probe.
 3. Verify that the action removes only the local copy while preserving the object in the synchronized namespace. Never substitute `rm`, Trash, or namespace deletion for local eviction.
 4. Aggregate candidates by provider and reviewed folder without double-counting parent and child targets. Show the candidate list even when eviction cannot yet be automated.
 5. Offer verified targets in a separate `cloud-local eviction` confirmation group. Each option must identify one provider and exact target set, estimated allocated benefit, offline-access loss, recovery method, and verification plan.
@@ -126,8 +159,8 @@ Before proposing local eviction for a folder or file:
 For an approved iCloud eviction:
 
 1. Re-check exact-target allocated and logical sizes, `isUploaded`, `isUploading`, `isDownloading`, conflicts, keep-downloaded state, and filesystem capacity immediately before action.
-2. Run `brctl evict "<exact-path>"` first. Do not use `--help` probing as the availability test because this private subcommand may be omitted from help and reject help flags while still accepting a real path.
-3. If `brctl evict` fails, verify that allocated size and provider state are unchanged before attempting Foundation `FileManager.evictUbiquitousItem(at:)`. Do not stack fallback actions when the first action may still be asynchronous.
+2. Use the specifically reviewed and approved eviction method. A private `brctl` command requires explicit version/capability review; Foundation or Finder also requires verified scope and sync evidence.
+3. If an operation fails or times out, reconcile partial/asynchronous state before trying another method. Do not stack fallback actions or restart `bird` as routine cleanup. Stop a known content-reading source first when handling accidental hydration; the no-hydration guard does not cancel an existing transfer.
 4. Verify allocated bytes fall, logical bytes and namespace remain, and provider metadata still reports the item uploaded and not trashed. Folder-level `isDownloaded=1` alone does not prove descendants remain materialized.
 
 If item-level status or supported eviction semantics cannot be verified, classify the target `AMBIGUOUS`, include it in the report, and provide exact provider UI steps or the narrow next audit needed. Do not silently omit it or guess a filesystem deletion command.
@@ -137,22 +170,24 @@ The cloud module is `PARTIAL` when a cloud root is discovered but item-level off
 ## Cleanup Workflow
 
 1. Discover capabilities and establish capacity checkpoints.
-2. Build the filesystem/storage topology and complete the cache, GUI-app, and Homebrew/package audits.
+2. Run the unified audit and inspect its `audit_summary`, every `orchestrator_module` record, and the generated report before proposing any action. Build additional owner-specific inventories only for material areas not yet covered.
 3. Classify each target as `PROTECTED/IN-USE`, `REVIEW-CANDIDATE`, `AMBIGUOUS`, `STALE-ARTIFACT`, `SAFE-GARBAGE`, `APPROVAL-REQUIRED`, `REVIEW-ONLY`, or `EXCLUDED`.
-4. Write a dry-run report containing exact path/owner, allocated and logical size where relevant, evidence, classification, action, recovery path, risk, confidence, and verification.
-5. Present concise findings in chat before calling `question`.
-6. Use separate confirmation groups for caches, cloud-local eviction, personal files, models, apps, app data, Docker, VMs/SDKs, packages, snapshots, and administrator handoffs.
-7. Each option must map to one concrete owner or exact target set. Include every path and material risk. Never use a broad option such as `delete all personal data`, `all app data`, `all models`, or `all volumes`.
-8. Execute only options selected through `question`. Re-run exact target and capacity preflight immediately before every selected group.
-9. Verify owner/service health, exact target state, Trash destination where applicable, and `df -k` after each group.
-10. Reconcile every selected target as `EXECUTED`, `MOVED-TO-TRASH`, `BLOCKED-PRIVILEGE`, `BLOCKED-IN-USE`, `SKIPPED`, `NOT-FOUND`, or `UNCHANGED`.
+4. If a cloud root is discovered, complete the item-level cloud audit before presenting cleanup choices. If provider tooling cannot enumerate exact offline candidates, mark the cloud module `PARTIAL` and state that limitation explicitly; do not present the cloud root as an actionable cleanup target.
+5. Extend the generated report with ownership, activity/lock evidence, installed-version action scope, recovery cost, risk and verification. Collector records remain REVIEW-ONLY. For supported cache owners prepare a separate action plan through the reviewed CLI; do not flip `actionable`, copy a command from old JSON, or bypass a blocked adapter with raw deletion.
+6. Present concise findings in chat before calling `question`. The findings must say which cloud providers were found, whether item-level verification completed, and whether cloud actions are included or excluded.
+7. If cloud verification is incomplete, finish all available guarded checks and name the exact unresolved requirement. Ask only for a concrete missing permission, account decision or scope choice; do not ask whether to perform an already requested safe audit. Keep unverified cloud data untouched while reporting other categories.
+8. Use separate confirmation groups for caches, cloud-local eviction, personal files, models, apps, app data, Docker, VMs/SDKs, packages, snapshots, and administrator handoffs.
+9. Each option must map to one concrete owner or exact target set. Include every path and material risk. Never use a broad option such as `delete all personal data`, `all app data`, `all models`, or `all volumes`.
+10. Execute only independently verified plans selected through `question`, not collector suggestions. Re-run exact target identity/scope, owner activity and capacity preflight immediately before every selected group. Execute groups sequentially. A question instead of a selection is not approval; changed targets or continued material drift require a new decision.
+11. Verify owner/service health, exact target state, Trash destination where applicable, and `df -k` after each group.
+12. Preserve executor outcomes `BLOCKED`, `PARTIAL`, `EXECUTED` and `UNCHANGED` with their reasons; do not turn an interrupted action into success. Other owner workflows may report `MOVED-TO-TRASH`, `BLOCKED-PRIVILEGE`, `BLOCKED-IN-USE`, `SKIPPED` or `NOT-FOUND`. If private raw output could not be removed, report retention and required reconciliation without displaying it.
 
 For several independent low-risk caches, a multi-select question may include an `All listed low-risk caches` option and `None`. It must not include personal data, models, apps, Docker volumes, cloud deletion, snapshots, VMs, databases, or SDK state.
 
 ## Owner-Aware Procedures
 
-- Prefer package-manager cleanup commands over direct deletion. State whether recovery is local regeneration, public download, private registry, or unverified.
-- Verify exact owner processes with `pgrep -x` or exact executable paths. Never use full-command-line substring matching for closure checks.
+- Prefer version-supported selective pruning and warm-cache budgets over full reset. Check owner locks, action scope and regeneration cost; do not bypass busy locks. State whether recovery is local regeneration, public download, private registry, or unverified.
+- Check owner processes plus known writers/dependents (for example gopls/editors for Go). Missing visibility means unknown, not idle. Do not expose full command-line arguments. A cache's measurable size does not prove owner inactivity.
 - Preserve cache roots and metadata when directly clearing exact cache contents. Enumerate dotfiles safely and do not follow symlinks or cross mount points.
 - Use Docker commands for Docker resources. Never delete Docker Desktop's container directory directly. Keep active containers, compose stacks, databases, and volumes separate.
 - Use Xcode, `simctl`, Android Studio/`avdmanager`, UTM, or another owning tool for SDK/device/VM state. Never delete raw simulator or VM directories as generic cleanup.
@@ -166,7 +201,7 @@ For broad `cleanup`, audit GUI apps and package managers. For named `uninstall`,
 
 For GUI apps, collect bundle path, allocated size, install/update evidence, Spotlight last-used metadata, exact running processes, cask ownership, helpers, launch jobs, extensions, and app-data candidates. Null Spotlight metadata is missing evidence, not proof of non-use.
 
-For Homebrew, prefix audit commands with `HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1`. Prefer one bulk installed JSON query, direct Cellar/Caskroom size passes, `brew leaves --installed-on-request`, dependency/use graphs, pins, services JSON, and `brew autoremove --dry-run`. Avoid slow per-formula calls and zsh special variable names such as `path` and `status`.
+For Homebrew, set `HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1 HOMEBREW_NO_AUTOREMOVE=1` to separate incidental maintenance. Verify installed-version semantics and use the same configuration for preview and action. Treat explicit autoremove as a separate package decision. Prefer bulk installed JSON, guarded Cellar/Caskroom measurements, leaves, dependency graphs, pins and services over slow per-formula calls.
 
 Separate install age from usage evidence. Protect dependencies, active dependents, pinned packages, running services, active project toolchains, OCR/model tooling, databases, and provider clients. Missing history produces `AMBIGUOUS` or `REVIEW-CANDIDATE`, never `unused`.
 
@@ -183,7 +218,7 @@ Recognize `uninstall <app-name-or-exact-path> ...`. Resolve each target to exact
 
 ## Reports
 
-Write `macos-cleanup/macos-cleanup-YYYY-MM-DD-HHMM.md` relative to the active project. Do not copy run-specific facts into this skill directory.
+Write each run in a fresh private directory under `macos-cleanup/` relative to the active project, with a unique timestamp/suffix, `report.md`, `inventory.jsonl` and validated per-module output. Never reuse or overwrite an existing output directory. Do not copy run-specific facts into this skill directory.
 
 Include:
 

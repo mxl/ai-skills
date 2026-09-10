@@ -626,7 +626,12 @@ def _arg_parser() -> argparse.ArgumentParser:
     # allowed before the no-hydration guard is established in main().
     parser.add_argument("--target", default=os.environ.get("HOME") or "/")
     parser.add_argument("--output")
-    parser.add_argument("--timeout", default=os.environ.get("MACOS_CLEANUP_MODULE_TIMEOUT", "120"))
+    parser.add_argument(
+        "--timeout",
+        default=os.environ.get("MACOS_CLEANUP_MODULE_TIMEOUT", str(MAX_TIMEOUT)),
+        help=f"Per-module timeout in seconds (default and maximum: {MAX_TIMEOUT:g}); "
+             "overridable by MACOS_CLEANUP_MODULE_TIMEOUT",
+    )
     parser.add_argument("--modules", default=",".join(DEFAULT_MODULES))
     return parser
 

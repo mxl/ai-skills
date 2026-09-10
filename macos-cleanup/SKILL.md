@@ -40,6 +40,8 @@ Before finishing a skill change, search production files for absolute user-home 
 
 For broad `cleanup`, run `scripts/audit-all.sh` from the active project, using its resolved absolute skill path. It delegates to the Python orchestrator, validates JSON records, supervises guarded process groups, preserves valid partial results and writes private reports. Use `--modules <comma-separated-list>` for a fresh subset run; this is not a complete cleanup audit. Read `references/inventory-schema.md` before consuming records.
 
+The default and maximum module timeout is 3600 seconds. `--timeout` or `MACOS_CLEANUP_MODULE_TIMEOUT` can explicitly select a lower limit. This is per module, not the total audit duration: for a default four-module run, set the calling tool's outer timeout to at least 14520000 milliseconds (four hours plus two minutes for overhead), rather than relying on its 120000-millisecond default. For subsets or explicit overrides, budget the module count times the selected timeout plus overhead. If the tool cannot wait that long, use its supported supervised background execution and poll the same run; do not launch duplicate audits merely because the foreground wait expired. Cloud traversal hard limits remain unchanged.
+
 The existing shell modules are collectors, not safe standalone entry points. For a narrow filesystem collector, launch it through `python3 scripts/audit_runtime.py --guard-exec /bin/sh <collector> <arguments>` using resolved paths. No content searches, hashes, previews, or broad recursive `$HOME` scans are part of ordinary audit. Do not silently fall back to an unguarded collector if Python or the Darwin policy is unavailable.
 
 Audit scripts do not invoke cleanup commands. Owner CLI discovery can have incidental metadata/cache effects; do not describe this as an OS-wide read-only sandbox. If a module fails or times out, retain valid records and mark the scope `PARTIAL`. Do not replace a blocked module with an untracked, unguarded scan. `proposed_action` strings in older records are advice, never executable input or approval.
@@ -169,20 +171,31 @@ The cloud module is `PARTIAL` when a cloud root is discovered but item-level off
 
 ## Cleanup Workflow
 
+Follow this order: audit all in-scope areas, present the consolidated results, ask which exact targets to clean, then handle each selected target's preflight and execution. Active Go/editor processes or another execution blocker do not prevent storage measurement or the remaining audit. Record known blockers in the results without asking the user to close applications or resolve them during the audit.
+
+Do not substitute the cache adapter reviews for the full audit. Finish all available guarded checks across the required categories, including supplementary owner inventories for material areas the bundled runner does not implement. Explicitly report any remaining coverage gaps; unsupported cleanup automation does not mean an area has been audited or has no candidates.
+
 1. Discover capabilities and establish capacity checkpoints.
 2. Run the unified audit and inspect its `audit_summary`, every `orchestrator_module` record, and the generated report before proposing any action. Build additional owner-specific inventories only for material areas not yet covered.
 3. Classify each target as `PROTECTED/IN-USE`, `REVIEW-CANDIDATE`, `AMBIGUOUS`, `STALE-ARTIFACT`, `SAFE-GARBAGE`, `APPROVAL-REQUIRED`, `REVIEW-ONLY`, or `EXCLUDED`.
 4. If a cloud root is discovered, complete the item-level cloud audit before presenting cleanup choices. If provider tooling cannot enumerate exact offline candidates, mark the cloud module `PARTIAL` and state that limitation explicitly; do not present the cloud root as an actionable cleanup target.
-5. Extend the generated report with ownership, activity/lock evidence, installed-version action scope, recovery cost, risk and verification. Collector records remain REVIEW-ONLY. For supported cache owners prepare a separate action plan through the reviewed CLI; do not flip `actionable`, copy a command from old JSON, or bypass a blocked adapter with raw deletion.
+5. Extend the generated report with ownership, activity/lock evidence, installed-version action scope, recovery cost, risk and verification. Collector records remain REVIEW-ONLY. Do not flip `actionable`, copy a command from old JSON, or bypass a blocked adapter with raw deletion.
 6. Present concise findings in chat before calling `question`. The findings must say which cloud providers were found, whether item-level verification completed, and whether cloud actions are included or excluded.
 7. If cloud verification is incomplete, finish all available guarded checks and name the exact unresolved requirement. Ask only for a concrete missing permission, account decision or scope choice; do not ask whether to perform an already requested safe audit. Keep unverified cloud data untouched while reporting other categories.
 8. Use separate confirmation groups for caches, cloud-local eviction, personal files, models, apps, app data, Docker, VMs/SDKs, packages, snapshots, and administrator handoffs.
 9. Each option must map to one concrete owner or exact target set. Include every path and material risk. Never use a broad option such as `delete all personal data`, `all app data`, `all models`, or `all volumes`.
+   Selecting a review-only target requests preparation, not permission to delete it. After target selection, prepare and show a separate plan for each supported cache owner and obtain exact digest-bound approval before execution. Disclose known limitations in the selection options; never label a blocked or unsupported target ready to execute.
 10. Execute only independently verified plans selected through `question`, not collector suggestions. Re-run exact target identity/scope, owner activity and capacity preflight immediately before every selected group. Execute groups sequentially and independently: a blocked, unavailable, declined, or failed target must not prevent review, approval, or execution of unrelated targets. A question instead of a selection is not approval; changed targets or continued material drift require a new decision.
 11. Verify owner/service health, exact target state, Trash destination where applicable, and `df -k` after each group.
 12. Preserve executor outcomes `BLOCKED`, `PARTIAL`, `EXECUTED` and `UNCHANGED` per target with their reasons; do not collapse independent targets into one fail-fast result or turn an interrupted action into success. Other owner workflows may report `MOVED-TO-TRASH`, `BLOCKED-PRIVILEGE`, `BLOCKED-IN-USE`, `SKIPPED` or `NOT-FOUND`. If private raw output could not be removed, report retention and required reconciliation without displaying it.
 
 For several independent low-risk caches, a multi-select question may include an `All listed low-risk caches` option and `None`. Expand the selection into separate plans and outcomes; if one cache is blocked, continue with every other approved cache. It must not include personal data, models, apps, Docker volumes, cloud deletion, snapshots, VMs, databases, or SDK state.
+
+### Selected-target failures
+
+Only after the user selects a target, if its preparation, preflight or cleanup is blocked, explain that target's reason and offer `Retry this target` or `Skip this target and continue`. Include the exact owner/path in the question. Never replace this with `Close your IDE or stop the cleanup`, `Continue the audit?`, or another all-or-nothing choice. Skipping declines only that target; unrelated checks and selected actions continue. Offer retry only when there is a concrete resolvable blocker; unsupported actions remain review-only, not a reason to repeat the same failed check.
+
+A retry requests a fresh check, not forced deletion or approval of a replacement plan. Reconcile any partial execution first; a new or changed plan requires fresh exact approval. Keep unselected targets untouched and do not ask the user to resolve their blockers. Report all per-target outcomes even when none could be executed; do not describe this as user cancellation unless the user explicitly cancelled the whole process.
 
 ## Owner-Aware Procedures
 

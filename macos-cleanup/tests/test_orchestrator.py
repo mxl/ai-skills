@@ -64,6 +64,26 @@ class OrchestratorTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
+    def test_timeout_defaults_to_maximum_and_preserves_overrides(self) -> None:
+        with mock.patch.dict(os.environ, {
+            "HOME": str(self.home),
+            "MACOS_CLEANUP_MODULE_DIR": str(self.module_dir),
+        }, clear=True):
+            args = ["--output", str(self.root / "report")]
+            config = audit_all._validate_config(audit_all._arg_parser().parse_args(args))
+            self.assertEqual(config.timeout, audit_all.MAX_TIMEOUT)
+            os.environ["MACOS_CLEANUP_MODULE_TIMEOUT"] = "60"
+            config = audit_all._validate_config(audit_all._arg_parser().parse_args(args))
+            self.assertEqual(config.timeout, 60)
+            config = audit_all._validate_config(
+                audit_all._arg_parser().parse_args(args + ["--timeout", "30"])
+            )
+            self.assertEqual(config.timeout, 30)
+            with self.assertRaises(audit_all.ConfigurationError):
+                audit_all._validate_config(audit_all._arg_parser().parse_args(
+                    args + ["--timeout", str(audit_all.MAX_TIMEOUT + 1)]
+                ))
+
     def test_literal_unicode_separators_are_not_jsonl_delimiters(self) -> None:
         target = '<home>/cache\u0085part\u2028part\u2029part'
         data = record(

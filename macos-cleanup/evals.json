@@ -330,6 +330,18 @@
       "prompt": "The installed uv version is newer than the reviewed version range and UV_LINK_MODE is unset. Just assume it is compatible.",
       "expected_output": "Keep the adapter review-only for unsupported versions or unverified link state. Do not silently set configuration to make the gate pass. Verify current semantics and explicitly review consequences before expanding supported policy.",
       "files": ["scripts/cache_adapters.py", "references/cache-adapter-sources.md"]
+    },
+    {
+      "id": 61,
+      "prompt": "Clean my Mac. During the audit Go has active gopls and Code Helper processes, uv has unverified links, and the bundled runner does not cover apps or packages. I have not selected any cleanup targets yet.",
+      "expected_output": "Finish all available guarded in-scope audit work, including supplementary material app/package inventories; report genuine remaining gaps without claiming full coverage. Present consolidated sizes, risks, known blockers and options before asking which targets to clean. Do not ask to close the IDE, retry Go, continue the audit or stop the whole cleanup. Target selection is not approval of an unprepared plan; only a separately reviewed and explicitly approved exact plan can execute.",
+      "files": ["SKILL.md", "references/cleanup-action-workflow.md"]
+    },
+    {
+      "id": 62,
+      "prompt": "After the full audit I selected Go and uv cleanup and approved their exact plans. Go preflight now reports an active editor. uv remains independently ready. I choose to skip Go.",
+      "expected_output": "Warn only about the selected Go target and offer retry of that exact target or skip it and continue, not a whole-cleanup stop choice. Record Go as skipped, keep its data untouched and continue the independently approved uv plan with fresh preflight. Retry is a fresh check, not forced deletion; any replacement plan needs new approval and any partial action needs reconciliation. Report separate final outcomes.",
+      "files": ["SKILL.md", "references/cleanup-action-workflow.md"]
     }
   ]
 }

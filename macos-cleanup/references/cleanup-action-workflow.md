@@ -14,20 +14,20 @@ Use `python3 <skill>/scripts/cleanup_actions.py --help` for syntax. Resolve `<sk
 | `execute --plan <private-plan> --confirm-digest <exact-digest> --journal-dir <private-journal>` | Verify and dispatch the selected supported action | Yes, only after explicit user choice |
 | `cloud-metadata --root <exact-provider-root>` | Bounded metadata inventory, not eviction | No |
 
-The initial executable action types are narrowly scoped uv cache pruning and Go build-cache cleaning, subject to the installed-version adapter's checks. npm and Homebrew reviews do not imply executable support. Models, volumes, snapshots, apps, SDKs, personal files and cloud eviction are not generic cache actions.
+The bundled digest-bound executable action types are narrowly scoped uv cache pruning and Go build-cache cleaning, subject to the installed-version adapter's checks. When an adapter is unavailable, review-only, or outside its version policy, the agent may instead prepare an owner-command fallback for a narrow rebuildable target: inspect the installed CLI help, verify exact scope and owner activity, prefer dry-run/status evidence, disclose risks and exclusions, and obtain separate exact approval before execution. Models, Docker volumes, snapshots, apps, app data, SDKs, personal files and cloud eviction are not eligible for this fallback.
 
 ## Approval procedure
 
 For broad cleanup, complete the available in-scope audit and present consolidated results before asking which targets to clean. Owner activity is audit evidence, not a prerequisite for finishing the audit. Do not ask the user to close an IDE or choose whether to stop the whole cleanup because one cache is busy. Selection of a review-only target requests preparation; it is not executable-plan approval.
 
-1. Review owner evidence. Unsupported features, busy/unknown writers, incomplete visibility, unsupported links or centralized environments remain blockers; do not replace these checks with raw deletion.
-2. Prepare a new plan in private local storage. Existing files are refused. The plan includes exact target/tool identities, installed version, metadata fingerprint, dynamic owner-managed scope, fixed risk wording, creation and expiry times.
-3. Show the plan. Explain that the owner command manages a dynamic cache scope, not an immutable list of file deletions. Do not promise the entire allocated size will be freed.
-4. Ask for this exact plan through the question tool. A question, empty response, decline or request for more information is not selection.
-5. After selection, pass the exact displayed digest to the executor. Do not derive a new plan or silently replace its target after approval. A new plan needs a new decision.
-6. Reconcile each target independently. A blocked preflight performs no cleanup for that target, but must not block review or execution of unrelated approved plans. An interrupted or partially completed action must not be retried automatically. Inspect its journal before any newly approved attempt, then continue with other independent targets.
+1. Review owner evidence. Busy or unknown writers, incomplete visibility, ambiguous scope or centralized environments remain blockers; do not replace these checks with raw deletion.
+2. Prefer a digest-bound adapter plan when supported. Otherwise inspect the installed owner CLI's local help and prepare an exact owner-command fallback with its target, options, dry-run/status evidence, risk, exclusions and verification steps.
+3. Show the plan or fallback command. Explain that the owner command manages a dynamic cache scope, not an immutable list of file deletions. Do not promise the entire allocated size will be freed.
+4. Ask for this exact plan or fallback command through the question tool. A question, empty response, decline or request for more information is not selection.
+5. After selecting an adapter plan, pass the exact displayed digest to the executor. After selecting a fallback, run only the exact approved owner command. Do not silently replace its target or options; any change needs a new decision.
+6. Reconcile each target independently. A blocked preflight performs no cleanup for that target, but must not block review or execution of unrelated approved plans. An interrupted or partially completed action must not be retried automatically. Inspect its journal or current owner state before any newly approved attempt, then continue with other independent targets.
 
-If preparation or execution of a selected target is blocked, ask only whether to retry that exact target after resolving its blocker or skip it and continue. Do not ask about blockers on unselected targets. A retry cannot bypass safety checks, replay an attempted digest, or authorize a new plan; unsupported actions remain review-only. Keep unrelated selected targets in the queue.
+If preparation or execution of a selected target is blocked, ask only whether to retry that exact target after resolving its blocker or skip it and continue. Do not ask about blockers on unselected targets. A retry cannot bypass safety checks, replay an attempted digest, or authorize a changed fallback command. Missing installed-help evidence, active writers, ambiguous targets and excluded high-risk classes remain blocked. Keep unrelated selected targets in the queue.
 
 A digest is an integrity and workflow binding, not a signature proving that a human clicked a UI. The assistant must still enforce the explicit selection step. Neither a saved plan nor its presence in a report authorizes execution.
 

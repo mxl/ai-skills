@@ -54,9 +54,9 @@ Audit scripts do not invoke cleanup commands. Owner CLI discovery can have incid
 | Orchestration | JSON validation, private fresh reports, module outcomes and coverage | Full cleanup includes categories not yet implemented |
 | Capacity/snapshots | Target-volume discovery and snapshot inventory | Snapshot presence gives no reclaimable-byte estimate |
 | Paths | Narrow allocated/apparent measurements | No automatic full-home content scan |
-| Caches | Measurement plus guarded version/writer review; plan adapters for uv and Go | npm/pnpm/Homebrew are review-only; unsupported versions, symlinks and unknown activity block plans |
+| Caches | Measurement plus guarded version/writer review; plan adapters for uv and Go; reviewed owner-command fallback | Missing or blocked adapters require command-specific preflight, exact approval and verification |
 | Cloud | Root discovery automatically invokes bounded metadata inventory per root | Sync/pin/conflict/eviction remain unverified; no cloud mutation is implemented |
-| Execution | Separate digest-bound uv/Go executor with TTL, fresh preflight and single-use journal | No generic deletion, automatic retry, or automatic reconciliation; audit records never authorize actions |
+| Execution | Digest-bound uv/Go executor plus approved owner CLI fallback for narrow, rebuildable targets | No raw recursive deletion, automatic retry, or automatic reconciliation; audit records never authorize actions |
 | Apps/packages/Docker/VM/SDK/models/duplicates | Requirements below describe the target workflow | Report missing coverage; do not claim these adapters already ran |
 
 Unit/fixture tests are not a live File Provider integration test or an agent benchmark. State which verification actually ran.
@@ -68,6 +68,22 @@ Use `python3 <skill>/scripts/cleanup_actions.py review --adapter <owner>` for fr
 Only after the user selects that exact plan through `question`, call `execute --plan <plan> --confirm-digest <displayed-digest> --journal-dir <private-journal>`. A newly prepared or changed plan requires a new choice. The executor rechecks expiry immediately before dispatch and blocks replay of a previously attempted digest, including interrupted attempts. A digest is a workflow binding, not proof that a human agreed; enforce the selection step.
 
 Review `references/cleanup-action-workflow.md` and `references/cache-adapter-sources.md` before use. The initial adapters have explicit version limits. uv requires an explicitly supported link mode; do not set environment variables merely to bypass a blocked review. Go clears inherited flags and external cache-program settings before its fixed build-cache-only command. Historical link relationships or shared environments cannot be inferred solely from the current environment.
+
+### Owner-command fallback
+
+Prefer a supported adapter when available, but do not require one for a narrow rebuildable target managed by an installed owner CLI. When an adapter is missing, review-only, or outside its version policy, the skill may propose and execute the owner's documented cleanup command after all of these checks:
+
+1. Resolve the executable and configured target on the current Mac; never assume a path or package-manager prefix.
+2. Inspect the installed command's `--help` or equivalent local documentation and use only options shown by that installation. Do not guess syntax from memory.
+3. Check exact owner and known writer processes. An active writer blocks only its own target; continue unrelated selected actions. Never use a force flag to bypass an in-use check.
+4. Prefer a dry-run, status, verify, or inventory command when the owner provides one. Show the exact action, scope, estimated benefit, regeneration or redownload cost, and exclusions.
+5. Obtain separate explicit approval for the exact owner command through `question`. Approval of an audit candidate or another cleanup group is not approval for this command.
+6. Execute one owner command at a time without shell wildcards or raw recursive deletion. Capture `df -k` and owner state before and after.
+7. If execution times out after dispatch, do not retry automatically. Reconcile owner state first; treat completed, partial, and unchanged outcomes separately.
+
+Eligible fallback examples include `brew cleanup`, `npm cache clean`, `pnpm store prune`, `go clean -cache`, `uv cache prune`, `docker builder prune`, and `docker image prune` when their installed help confirms the required scope. These examples are not fixed commands and do not authorize execution by themselves.
+
+Do not use this fallback for Docker volumes, cloud namespace deletion or eviction, models with shared blobs, VMs, simulators, SDKs, databases, snapshots, application data, credentials, personal files, or privileged system maintenance. Those remain dedicated workflows with their existing approval and verification requirements.
 
 ## No-Hydration Policy
 
@@ -179,13 +195,13 @@ Do not substitute the cache adapter reviews for the full audit. Finish all avail
 2. Run the unified audit and inspect its `audit_summary`, every `orchestrator_module` record, and the generated report before proposing any action. Build additional owner-specific inventories only for material areas not yet covered.
 3. Classify each target as `PROTECTED/IN-USE`, `REVIEW-CANDIDATE`, `AMBIGUOUS`, `STALE-ARTIFACT`, `SAFE-GARBAGE`, `APPROVAL-REQUIRED`, `REVIEW-ONLY`, or `EXCLUDED`.
 4. If a cloud root is discovered, complete the item-level cloud audit before presenting cleanup choices. If provider tooling cannot enumerate exact offline candidates, mark the cloud module `PARTIAL` and state that limitation explicitly; do not present the cloud root as an actionable cleanup target.
-5. Extend the generated report with ownership, activity/lock evidence, installed-version action scope, recovery cost, risk and verification. Collector records remain REVIEW-ONLY. Do not flip `actionable`, copy a command from old JSON, or bypass a blocked adapter with raw deletion.
+5. Extend the generated report with ownership, activity/lock evidence, installed-version action scope, recovery cost, risk and verification. Collector records remain REVIEW-ONLY. Do not flip `actionable` or copy a command from old JSON. If an adapter is unavailable or blocked, use the owner-command fallback only after fresh local help review, target preflight and exact approval; never replace it with raw deletion.
 6. Present concise findings in chat before calling `question`. The findings must say which cloud providers were found, whether item-level verification completed, and whether cloud actions are included or excluded.
 7. If cloud verification is incomplete, finish all available guarded checks and name the exact unresolved requirement. Ask only for a concrete missing permission, account decision or scope choice; do not ask whether to perform an already requested safe audit. Keep unverified cloud data untouched while reporting other categories.
 8. Use separate confirmation groups for caches, cloud-local eviction, personal files, models, apps, app data, Docker, VMs/SDKs, packages, snapshots, and administrator handoffs.
 9. Each option must map to one concrete owner or exact target set. Include every path and material risk. Never use a broad option such as `delete all personal data`, `all app data`, `all models`, or `all volumes`.
-   Selecting a review-only target requests preparation, not permission to delete it. After target selection, prepare and show a separate plan for each supported cache owner and obtain exact digest-bound approval before execution. Disclose known limitations in the selection options; never label a blocked or unsupported target ready to execute.
-10. Execute only independently verified plans selected through `question`, not collector suggestions. Re-run exact target identity/scope, owner activity and capacity preflight immediately before every selected group. Execute groups sequentially and independently: a blocked, unavailable, declined, or failed target must not prevent review, approval, or execution of unrelated targets. A question instead of a selection is not approval; changed targets or continued material drift require a new decision.
+   Selecting a review-only target requests preparation, not permission to delete it. After target selection, use a supported digest-bound plan when available. Otherwise prepare the owner-command fallback with installed-help evidence, exact scope, risks and exclusions, then obtain separate exact approval. Disclose known limitations in the selection options; never label an active, ambiguous or unverified target ready to execute.
+10. Execute only an independently verified digest-bound plan or an exact owner-command fallback selected through `question`, never a collector suggestion. Re-run exact target identity/scope, owner activity and capacity preflight immediately before every selected group. Execute groups sequentially and independently: a blocked, unavailable, declined or failed target must not prevent review, approval or execution of unrelated targets. A question instead of a selection is not approval; changed commands, targets or continued material drift require a new decision.
 11. Verify owner/service health, exact target state, Trash destination where applicable, and `df -k` after each group.
 12. Preserve executor outcomes `BLOCKED`, `PARTIAL`, `EXECUTED` and `UNCHANGED` per target with their reasons; do not collapse independent targets into one fail-fast result or turn an interrupted action into success. Other owner workflows may report `MOVED-TO-TRASH`, `BLOCKED-PRIVILEGE`, `BLOCKED-IN-USE`, `SKIPPED` or `NOT-FOUND`. If private raw output could not be removed, report retention and required reconciliation without displaying it.
 
@@ -193,7 +209,7 @@ For several independent low-risk caches, a multi-select question may include an 
 
 ### Selected-target failures
 
-Only after the user selects a target, if its preparation, preflight or cleanup is blocked, explain that target's reason and offer `Retry this target` or `Skip this target and continue`. Include the exact owner/path in the question. Never replace this with `Close your IDE or stop the cleanup`, `Continue the audit?`, or another all-or-nothing choice. Skipping declines only that target; unrelated checks and selected actions continue. Offer retry only when there is a concrete resolvable blocker; unsupported actions remain review-only, not a reason to repeat the same failed check.
+Only after the user selects a target, if its preparation, preflight or cleanup is blocked, explain that target's reason and offer `Retry this target` or `Skip this target and continue`. Include the exact owner/path in the question. Never replace this with `Close your IDE or stop the cleanup`, `Continue the audit?`, or another all-or-nothing choice. Skipping declines only that target; unrelated checks and selected actions continue. Offer retry only when there is a concrete resolvable blocker. A missing adapter may use the owner-command fallback, but missing installed-help evidence, ambiguous scope, active writers or excluded high-risk classes remain blocked.
 
 A retry requests a fresh check, not forced deletion or approval of a replacement plan. Reconcile any partial execution first; a new or changed plan requires fresh exact approval. Keep unselected targets untouched and do not ask the user to resolve their blockers. Report all per-target outcomes even when none could be executed; do not describe this as user cancellation unless the user explicitly cancelled the whole process.
 

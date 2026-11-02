@@ -28,6 +28,7 @@ The `docx` and `pptx` skills share a common OOXML engine in [`common/ooxml/`](co
 | [`video-summary`](video-summary/) | Summarize YouTube videos/playlists, web videos, local video files, streams, transcripts, audio, and frames. | Configurable presets, `yt-dlp` subtitle helper, `peepshow` orchestration, Fabric prompt routing |
 | [`meeting-transcript`](meeting-transcript/) | Save meeting transcripts and verified summaries into an Obsidian-style vault. | Storage rules, summary verification, action-item extraction guidance |
 | [`screenpipe`](screenpipe/) | Export detected Screenpipe meetings and full transcripts for `meeting-transcript`. | Authenticated local API fetcher, interactive range selection, raw + canonical JSON artifacts |
+| [`browser-automation`](browser-automation/) | Coordinate persistent project Chrome profiles, parallel pinned task sessions, and local human credential entry. | macOS/Python coordinator, project locks, human/auth leases, scoped cleanup; live-browser qualification required |
 | [`regru`](regru/) | Check exact domain names for availability through REG.RU API 2. | Self-contained REG.RU `domain/check` CLI with optional client SSL auth |
 | [`domain-check`](domain-check/) | Check exact domain availability for .ru, .рф, and other TLDs using public registry signals (RDAP/WHOIS). | No-API availability CLI with IDN support |
 | [`domain-suggest`](domain-suggest/) | Brainstorm brandable domain/name ideas for a startup, product, or project, then verify availability by delegating to `domain-check`. | Naming methodology + generation-technique references; reuses the no-API availability CLI |
@@ -81,7 +82,7 @@ Install only the dependencies required by the skills you use.
 | Dependency | Used by | Example macOS install |
 | --- | --- | --- |
 | Python 3.9+ | `docx`, `pptx`, `pdf` | `brew install python` |
-| Python 3.10+ | `meeting-transcript`, `screenpipe` | `brew install python` |
+| Python 3.10+ | `meeting-transcript`, `screenpipe`, `browser-automation` | `brew install python` |
 | Node.js | `pptx` (PptxGenJS), `video-summary`, `regru` | `brew install node` |
 | `defusedxml` | `docx`, `pptx` — XML parsing | `python3 -m pip install defusedxml` |
 | `python-docx` | `docx` — extraction and simple document generation | `python3 -m pip install python-docx` |
@@ -94,6 +95,7 @@ Install only the dependencies required by the skills you use.
 | `yt-dlp` | `video-summary` | `python3 -m pip install yt-dlp` |
 | `jsonschema` | `meeting-transcript`, `screenpipe` | `python3 -m pip install 'jsonschema>=4.25,<5'` |
 | Screenpipe desktop + local API key | `screenpipe` | Run Screenpipe, then set `SCREENPIPE_LOCAL_API_KEY` from `bun x screenpipe@latest auth token`. |
+| macOS, Chrome, `agent-browser`, Git, `lsof` | `browser-automation` | See the skill's onboarding and qualification gates before launching a browser. |
 | REG.RU partner API credentials | `regru` | Set `REGRU_USERNAME` and `REGRU_PASSWORD`; optionally `REGRU_SSL_CERT_PATH` and `REGRU_SSL_KEY_PATH`. REG.RU `domain/check` requires partner/reseller access. |
 | WhoisXML API key | `domain-check` | Set `WHOISXML_API_KEY` environment variable (only for legacy WhoisXML fallback). |
 

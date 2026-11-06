@@ -1,0 +1,26 @@
+{
+  "skill_name": "browser-automation",
+  "purpose": "Implicit native discovery without a skill name or an AGENTS.md activation pointer. These are routing cases, not permission to execute browser actions.",
+  "queries": [
+    {"id": 1, "query": "Открой https://example.org в браузере и проверь, открывается ли меню по кнопке.", "should_trigger": true},
+    {"id": 2, "query": "Заполни форму регистрации тестовыми данными и проверь ошибки обязательных полей.", "should_trigger": true},
+    {"id": 3, "query": "Сделай скриншот мобильной версии страницы и проверь, не обрезана ли кнопка отправки.", "should_trigger": true},
+    {"id": 4, "query": "Мне нужно войти в панель проекта. Открой страницу входа, а пароль и код я введу сам через удалённый экран.", "should_trigger": true},
+    {"id": 5, "query": "Проверь checkout в браузере: корзина, валидация адреса и возврат назад без потери данных.", "should_trigger": true},
+    {"id": 6, "query": "Automate the admin UI export: open the report page, select last month, and download the CSV.", "should_trigger": true},
+    {"id": 7, "query": "В соседнем проекте уже работает агент. Мне нужна отдельная вкладка для второй задачи с сохранёнными входами этого проекта.", "should_trigger": true},
+    {"id": 8, "query": "Настрой доступ с другого компьютера к браузерному экрану, чтобы я мог вручную вводить данные через VPN.", "should_trigger": true},
+    {"id": 9, "query": "Получи текст статьи по HTTP без браузера и JavaScript-рендеринга.", "should_trigger": false},
+    {"id": 10, "query": "Найди официальные источники о WebSocket-прокси; взаимодействовать с сайтами не нужно.", "should_trigger": false},
+    {"id": 11, "query": "Напиши unit-тесты для серверного калькулятора цены. UI и браузер не нужны.", "should_trigger": false},
+    {"id": 12, "query": "Объясни, чем BrowserContext в Playwright отличается от страницы. Ничего в браузере не запускай.", "should_trigger": false},
+    {"id": 13, "query": "Оптимизируй SQL-запрос отчёта по существующему плану выполнения.", "should_trigger": false},
+    {"id": 14, "query": "Предложи три варианта текста кнопки регистрации; страницу открывать не нужно.", "should_trigger": false},
+    {"id": 15, "query": "Отрефакторь компонент по существующим тестам, но не запускай браузер и не проверяй сайт вручную.", "should_trigger": false},
+    {"id": 16, "query": "Разбери предоставленный текст серверного лога, без доступа к веб-интерфейсу.", "should_trigger": false},
+    {"id": 17, "query": "Click through the settings page in the existing browser and verify that save persists after reload. This is just one task.", "should_trigger": true},
+    {"id": 18, "query": "Проверь, свободен ли домен example.ru, через реестр, не через сайт регистратора.", "should_trigger": false},
+    {"id": 19, "query": "Проверь в браузере состояние моей уже авторизованной панели, не меняя аккаунт.", "should_trigger": true},
+    {"id": 20, "query": "Объясни синтаксис reverse_proxy в Caddy, без настройки или запуска сервисов.", "should_trigger": false}
+  ]
+}

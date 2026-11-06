@@ -15,7 +15,7 @@ Python 3.10+ standard library only. Live operations target macOS; pure functions
 | `inspect` / `status` | Resolve canonical root and check browser/onboarding state | No browser launch |
 | `start --allow-launch [--headed] [--chrome PATH]` | Start only when no conflicting project browser/tasks exist | Explicit host approval first; flag is an accident guard |
 | `attach --task ID --url URL` | Create a pinned task tab in the existing verified project browser | Never auto-launch; clean URL, no userinfo/query/fragment |
-| `run --task ID -- COMMAND ARGS` | Run a supported ordinary page command with forced session/CDP/pin/namespace | Reject during task human lease or project auth lease |
+| `run --task ID -- COMMAND ARGS` | Run a supported ordinary page command with forced session/CDP/pin/namespace | Reject human-owned task; auth lease blocks unless approved site-scoped opt-in proves independence |
 | `handoff --task ID --captures-stopped [--auth]` | Persist task human ownership, optionally project auth ownership | Ask human first; stop capture outside helper too |
 | `viewer --task ID [--allow-start --port PORT]` | Inspect handoff; optionally enable only its task-scoped loopback stream through the sanitized helper environment | Approve stream preparation first; no Chrome/dashboard launch or verified human connection |
 | `resume --task ID --human-confirmed [--account-verified]` | Explicitly return task control after completed input | Auth handoff requires account verification declaration |
@@ -48,11 +48,23 @@ python3 <skill-dir>/scripts/browser_session.py --project <root> run --task issue
 
 `--captures-stopped`, `--human-confirmed`, and `--account-verified` record explicit caller declarations. They do not authenticate the human, inspect every recording pipeline, or prove that the destination website accepted a login.
 
-A human lease has no automatic expiry-to-resume. Viewer disconnect or a stale task does not authorize a different task to take over. Account switches still affect shared project state even when task tabs are pinned.
+A human lease has no automatic expiry-to-resume. Viewer disconnect or a stale task does not authorize a different task to take over. Account switches still affect shared project state even when task tabs are pinned. The explicitly approved [site-scoped opt-in](operations.md#site-scoped-handoff-opt-in) allows independent pinned tasks/attachments during another site's human or authentication handoff, including password/MFA input; it never resumes or clears the human lease.
 
 ## Known recovery boundary
 
 No automatic restart, mode switch, process kill, profile migration, update, global installation, password-manager integration, or auth transfer is provided. Follow [operations.md](operations.md) for approval and coordination. Missing targets and uncertain attachment outcomes fail closed rather than selecting a new tab automatically.
+
+## Private remote setup
+
+Remote setup is outside ordinary task commands. Follow [remote-access.md](remote-access.md) before using the separate helper:
+
+```bash
+python3 <skill-dir>/scripts/remote_access.py prepare --manifest <private-manifest.json> --output-dir <new-private-bundle>
+python3 <skill-dir>/scripts/remote_access.py adapt --bundle <private-bundle>
+python3 <skill-dir>/scripts/remote_access.py dashboard-start --bundle <private-bundle> --project <project-id> --allow-start
+```
+
+Preparation writes only a private review bundle outside Git. Adaptation is parser-only, not provisioning/live validation. Dashboard startup requires explicit approval and captures tokenized access URLs into protected files without displaying them. None of these commands activates Caddy, installs launchd services, changes trust/DNS/firewalls, or starts Chrome. Host approval remains authoritative; CLI flags are accident guards.
 
 ## Dependency/version handling
 

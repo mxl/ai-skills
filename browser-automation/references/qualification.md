@@ -80,6 +80,12 @@ Verify owner-scoped cleanup, failed-task preservation, explicit browser restart 
 
 Use the OpenCode Skill Creator review tools when available. If `skill_serve_review` or related tools are unavailable, record that blocker; do not claim a viewer was launched or substitute an unreviewed custom browser service. Preserve paired outputs and grading artifacts for later review.
 
+## Private remote-access qualification
+
+The separate remote helper's unit tests cover strict manifest validation, private interface/peer ranges, distinct hostnames, port conflicts, generated Caddy routes/headers/globals, hub exclusion of bearer links, owner-only files, bundle integrity, exact project socket directories, secret-output suppression, and launchd templates that are not installed. Parser-only `caddy adapt` may be checked with disposable files; never substitute `validate`, `run`, or `reload` under offline approval.
+
+For live remote access, follow the separately approved [remote acceptance matrix](remote-access.md#7-validate-before-real-credentials): actual remote HTTPS trust, peer denial, API/WS token and Origin checks, socket-directory discovery, synthetic credential privacy, and lease preservation. A generated config or successful adaptation does not establish those properties. No Caddy service, trust store, DNS, or network change is authorized merely by running the unit suite.
+
 ## Acceptance report
 
 Report exact test commands and results, installed versions tested, source revisions consulted, remaining gaps, and whether any live browser/account was accessed. Mark browser qualification **pending** until the live matrix actually passes. Global availability through an existing repository skill path is not proof of validation.

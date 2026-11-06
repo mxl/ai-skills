@@ -2,7 +2,7 @@
 
 ## Supported claim
 
-A local live viewport can send human input to an existing headless Chrome page without restarting Chrome. It can keep typed credentials outside the agent conversation and ordinary CLI command arguments. It is **not** a secrecy boundary against the viewer, daemon, destination page, other trusted local processes, or unrestricted CDP access.
+A local live viewport can send human input to an existing headless Chrome page without restarting Chrome. An explicitly approved [private HTTPS proxy](remote-access.md) can provide the same handoff from another computer. It can keep typed credentials outside the agent conversation and ordinary CLI command arguments. It is **not** a secrecy boundary against the viewer, proxy, daemon, destination page, other trusted local processes, or unrestricted CDP access.
 
 Use the existing task's named, pinned session. A second session must not claim its tab. The helper's persisted lease coordinates cooperating agents; direct raw CLI/CDP commands can bypass it and are outside the supported workflow.
 
@@ -13,7 +13,7 @@ Use the existing task's named, pinned session. A second session must not claim i
 3. If login/logout, account/organization switching, or cookie/authentication changes are involved, use a project authentication lease (`handoff --auth`). Shared cookies are not isolated by pinned tabs or different localhost ports.
 4. Stop screenshots, traces, recordings, screencasts consumed by the model, HAR/network collection, raw console forwarding, and dashboard activity persistence where supported. Confirm this before `--captures-stopped`. The helper does not enumerate or prove absence of every recorder.
 5. `handoff` records human ownership before viewer preparation. Check project/session/target/origin. A closed or changed target is a blocker, not permission to retarget keyboard input.
-6. Prepare a loopback-only viewer using the installed agent-browser's version-matched core/dashboard/streaming documentation. See the helper's `viewer` output if available. Starting the viewer is within the specifically approved handoff scope, not authority to launch a new Chrome, change its profile, or expose a remote service.
+6. Prepare the loopback stream using the installed agent-browser's version-matched core/dashboard/streaming documentation. See the helper's `viewer` output if available. Use a local dashboard or a separately approved [private remote dashboard](remote-access.md). Handoff approval is not authority to launch Chrome, change its profile, or configure a new remote service.
 7. The human opens the existing task session's viewport in their own browser. Avoid selecting/switching unrelated tabs. No dashboard AI Chat or external AI gateway is part of credential entry.
 8. The human types credentials or OTPs directly. Password values never appear in question answers, helper arguments, here-documents, environment assignments, model-visible stdout, or generated scripts. The agent neither types nor reads the secret.
 9. Viewer disconnect, inactivity, or task failure leaves human ownership intact. Ask for explicit completion/cancellation; a timer may notify, but cannot authorize resume.
@@ -31,7 +31,7 @@ agent-browser stream status
 agent-browser stream disable
 ```
 
-These are capabilities, not permission to issue them against a default session. Use the helper for task stream preparation so it supplies the verified namespace/session/CDP/pinning and sanitized child environment:
+These are capabilities, not permission to issue them against a default session. Use the helper for task stream preparation so it supplies the verified project socket-directory/session/CDP/pinning and sanitized child environment:
 
 ```bash
 python3 <skill-dir>/scripts/browser_session.py --project <root> viewer --task <task-id>
@@ -40,7 +40,7 @@ python3 <skill-dir>/scripts/browser_session.py --project <root> viewer --task <t
 
 The first command is discovery-only. The second requires an existing human lease and explicitly approved unused local port; it enables only that task's stream and checks that its listener is loopback-only. It does not start Chrome, start the dashboard, open a viewer, or prove that a human connected. It does not authenticate arbitrary local processes.
 
-The coordinating owner prepares the dashboard separately, using a trusted clean environment and the installed version's local-only setup. Do not stop/restart an existing shared dashboard or weaken namespace isolation to make discovery work. Verify that it discovers the intended namespaced session and preserves the selected CDP target. Otherwise stop and report the qualification gap. Do not invent a dashboard URL from the stream port, publish access tokens, or expose raw CDP/stream ports remotely.
+The coordinating owner prepares the dashboard separately, using a trusted clean environment and the task's recorded private socket directory (shared only after explicit runtime enrollment/migration). Keep the backend loopback-only; remote access uses only the approved Caddy HTTPS path in [remote-access.md](remote-access.md). Do not stop/restart an existing dashboard or weaken socket-directory isolation to make discovery work. Verify that it discovers the intended project session and preserves the selected CDP target. Otherwise stop and report the qualification gap. Do not invent a dashboard URL from the stream port, publish bootstrap tokens, or expose raw CDP/stream ports remotely.
 
 Stream preparation is the narrowly scoped exception to ordinary page commands while human-leased. It must not navigate, type, evaluate, capture into model artifacts, switch tabs, or change ownership. A successfully enabled stream is not proof that the viewer is privacy-qualified.
 
@@ -50,7 +50,7 @@ The dashboard is shared infrastructure. Do not stop its service as part of one t
 
 - Password dots hide pixels, not DOM values, CDP, page JavaScript, or network content.
 - Screenshot masking does not sanitize trace snapshots, videos, HAR files, errors, console messages, or cookies.
-- Direct viewport keyboard input uses plaintext within trusted local processes and CDP. Loopback binding does not authenticate against arbitrary local processes.
+- Direct viewport keyboard input uses plaintext within trusted local processes and CDP. For remote access, HTTPS protects the LAN/VPN hop but terminates at trusted Caddy; it is not end-to-end encryption into Chrome. Loopback binding does not authenticate against arbitrary local processes.
 - Disable optional dashboard AI Chat during sensitive use. Do not assume all activity/console feeds are redacted or persistence is disabled by default.
 - Browser profiles intentionally persist session material. Treat them as sensitive even though Git ignores them. Do not copy cookies, export auth state, save passwords to an extra vault, or upload artifacts without separate scoped approval.
 - This version has no Bitwarden CLI, Agent Access, password-provider, clipboard-secret, or secret-returning MCP integration. Do not add one as an improvised recovery path.

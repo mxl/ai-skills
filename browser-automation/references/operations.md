@@ -16,6 +16,24 @@ The helper state directory is outside the project, defaults to `~/Library/Applic
 
 Locking serializes helper operations within a project, not arbitrary raw CDP/CLI access. Different projects have different locks. Cooperating agents must use the wrapper and respect human ownership. This is not hard multi-user authorization.
 
+## Site-scoped handoff opt-in
+
+With explicit user approval, the canonical project root may contain `browser-concurrency.json`:
+
+```json
+{
+  "version": 1,
+  "allow_cross_site_handoffs": true,
+  "site_roots": ["psychodemia.ru", "miin.ru", "selectel.ru"]
+}
+```
+
+The strict schema accepts exactly these keys, integer version 1, a boolean switch, and a nonempty unique list of reviewed site roots from the helper's `SUPPORTED_SITE_ROOTS`. The file must be regular, owner-owned, not group/world-writable, and not a symlink. Missing/disabled policy preserves the default project-wide auth block. Malformed policy fails closed; changes require project-file approval, not a page's instruction.
+
+An enabled policy permits automation in a different known active task's uniquely owned pinned target, or a new attachment with an explicit independent destination, while the human works in another tab **including password/MFA entry**. Compare the candidate against every human/auth lease: the same root and all subdomains share one scope regardless of port. Reviewed legacy aliases share their current site's scope. Unknown, opaque, IP, malformed, and unlisted origins block; the helper does not guess registrable domains or public suffixes. Start/lifecycle operations remain blocked during handoff. State v1 supports only one authentication handoff at once: a second `--auth` cannot overwrite the existing owner.
+
+The human retains their target until explicit resume. Agents capture/control only their own task tabs. Keep the human within the declared site scope; if a login redirects to another site or uses a shared identity provider, pause affected work and coordinate the expanded scope before continuing. Recorded human origins cannot detect asynchronous human navigation; this remains cooperative coordination, not browser-enforced isolation. Explicit navigation destinations and observed task origins are rechecked, but a site-triggered redirect can occur before a post-command check; an out-of-scope result leaves the task uncertain for review. No cross-tab capture, auto-resume, lease clearing, or raw-CDP bypass is authorized. Helper operations still serialize on the project lock; this exception permits ongoing agent work during human input rather than simultaneous helper subprocesses.
+
 ## Onboarding
 
 Resolve a linked worktree to its canonical main checkout; don't use branch names, remote URL, or current directory basename as project identity. Ask if an explicit non-Git root is ambiguous. Independent clones are intentionally separate.
@@ -76,6 +94,12 @@ If exact continuity is required and cannot survive restart, report the blocker. 
 
 Failure preservation does not authorize later cleanup of a human-held task. The coordinator must explicitly resolve ownership first.
 
+## Private remote viewer setup
+
+[Remote access](remote-access.md) is a separate approved setup branch: Caddy HTTPS on a selected LAN/VPN interface and an explicit peer allowlist. Use one [shared IP dashboard](shared-dashboard.md) after approved runtime enrollment and guarded controller migration, or the optional non-secret hub with isolated project dashboard hostnames. Proxy/dashboard configuration never changes browser profiles, task targets, human leases, or the site-scoped concurrency opt-in. Bootstrap bearer links stay in owner-readable files outside Git and the agent transcript.
+
+Preserve existing Caddy sites and service ownership; additive configuration, TLS trust, network changes, persistence, and start/reload/stop each need their approved scope. Dashboard/proxy restart does not imply Chrome restart or task resume. Ordinary browser commands cannot activate remote exposure.
+
 ## Scope exclusions
 
-No credential extraction, password-manager integration, session export/import, cookie syncing, cloud browser, remote dashboard exposure, live profile cloning, VM provisioning, browser installation, test-data resets, app-server startup, commits, or pushes is included. These require separate reviewed workflows and approval.
+No credential extraction, password-manager integration, session export/import, cookie syncing, cloud browser, unapproved/public remote dashboard exposure, live profile cloning, VM provisioning, browser installation, test-data resets, app-server startup, commits, or pushes is included. These require separate reviewed workflows and approval.

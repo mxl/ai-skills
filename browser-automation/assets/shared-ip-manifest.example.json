@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "mode": "shared-ip",
+  "hubOrigin": "https://10.23.45.6:8443",
+  "bindAddress": "10.23.45.6",
+  "allowedPeers": ["10.23.45.0/24"],
+  "tls": {"mode": "internal"},
+  "caddyAdminPort": 2029,
+  "projects": [
+    {
+      "id": "example-alpha",
+      "root": "/example/projects/alpha",
+      "origin": "https://10.23.45.6:8443",
+      "dashboardPort": 4860
+    },
+    {
+      "id": "example-beta",
+      "root": "/example/projects/beta",
+      "origin": "https://10.23.45.6:8443",
+      "dashboardPort": 4860
+    }
+  ]
+}

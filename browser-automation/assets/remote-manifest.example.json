@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "hubOrigin": "https://viewports.home.arpa:8443",
+  "bindAddress": "100.101.102.103",
+  "allowedPeers": ["100.101.102.104/32"],
+  "tls": {"mode": "internal"},
+  "caddyAdminPort": 2029,
+  "projects": [
+    {
+      "id": "shop",
+      "root": "/absolute/path/to/shop",
+      "origin": "https://shop.viewports.home.arpa:8443",
+      "dashboardPort": 4848
+    },
+    {
+      "id": "portal",
+      "root": "/absolute/path/to/portal",
+      "origin": "https://portal.viewports.home.arpa:8443",
+      "dashboardPort": 4849
+    }
+  ]
+}

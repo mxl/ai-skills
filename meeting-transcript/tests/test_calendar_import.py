@@ -8,6 +8,8 @@ import sys
 import tempfile
 import tomllib
 import unittest
+import shutil
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts' / 'meeting_transcript.py'
 CANONICAL = '''---
@@ -64,18 +66,18 @@ class CalendarWorkflowTests(unittest.TestCase):
         self.calendar.write_text(json.dumps(dict(version=1, provider='fixture', events=self.events)))
 
     def run_cli(self, *args, ok=True, env=None):
-        result = subprocess.run([sys.executable, str(SCRIPT), 'calendar', *map(str, args)], text=True, capture_output=True, env={**os.environ, **(env or {})})
+        result = subprocess.run([sys.executable, str(SCRIPT), 'calendar', *map(str, args)], text=True, capture_output=True, timeout=15, env={**os.environ, **(env or {})})
         if ok:
             self.assertEqual(result.returncode, 0, result.stderr)
         else:
             self.assertNotEqual(result.returncode, 0, result.stdout)
         return result
 
-    def preview(self, *args, start=True, ok=True):
+    def preview(self, *args, start=True, ok=True, env=None):
         values = ['preview', '--project', self.project, '--global-config', self.global_config, '--calendar', self.calendar, '--until', '2026-08-02T00:00:00Z']
         if start:
             values += ['--since', '2026-08-01T00:00:00Z']
-        return self.run_cli(*values, *args, ok=ok)
+        return self.run_cli(*values, *args, ok=ok, env=env)
 
     def data(self, text):
         return tomllib.loads(text.split('```toml\n', 1)[1].split('\n```', 1)[0])
@@ -123,6 +125,300 @@ class CalendarWorkflowTests(unittest.TestCase):
 
     def snapshot(self):
         return {str(p.relative_to(self.root)): (p.read_bytes(), p.stat().st_mtime_ns) for p in self.root.rglob('*') if p.is_file()}
+
+    def native_package(self, name='native', *, segments=None, speakers=None):
+        package = self.amanu / name
+        package.mkdir()
+        (package / 'meta.json').write_text(json.dumps(dict(started='2026-08-01T09:01:00Z', ended='2026-08-01T09:59:00Z', duration_seconds=3480, app='Planning', mic_capture=True)))
+        if segments is None:
+            segments = [dict(start_ms=0, end_ms=1000, speaker='speaker_0', text='Exact {{placeholder}} **speech**.'), dict(start_ms=1000, end_ms=2000, speaker='speaker_0', text='Сохрани 🌍.\nSecond line.'), dict(start_ms=2000, end_ms=3000, speaker='speaker_1', text='Done.')]
+        (package / 'transcript.json').write_text(json.dumps(dict(created_at='2026-08-01T10:01:00.750Z', engine='fixture', model='synthetic', segments=segments), ensure_ascii=False))
+        if speakers is not None:
+            (package / 'speakers.json').write_text(json.dumps(dict(created_at='2026-08-01T10:02:00Z', speakers=speakers), ensure_ascii=False))
+        (package / 'transcribe.log').write_text('2026-08-01T10:00:00Z transcribing synthetic-input\n2026-08-01T10:01:00Z done — ' + str(len(segments)) + ' segments\n2026-08-01T10:01:01Z archive complete\n')
+        return package
+
+    def native_match(self, *flags):
+        plan = self.data(self.preview().stdout)
+        artifact = next(a for a in plan['artifacts'] if a['type'] == 'amanu')
+        event = plan['meetings'][0]['event']['key']
+        return self.preview('--match', artifact['id'] + '=' + event, *flags)
+
+    def test_native_json_snapshot_preserves_segments_labels_and_literal_speech(self):
+        package = self.native_package(speakers={'speaker_0': {'name': 'Synthetic Alice', 'source': 'manual'}})
+        before = self.snapshot()
+        report = self.native_match()
+        plan = self.data(report.stdout)
+        self.assertEqual(plan['meetings'][0]['status'], 'ready')
+        self.assertEqual(before, self.snapshot())
+        self.assertNotIn('Exact {{placeholder}}', report.stdout)
+        path, approval = self.save_plan(report)
+        original = {p.name: p.read_bytes() for p in package.iterdir()}
+        self.apply(path, approval)
+        transcript = next((self.project / 'meetings').glob('*/transcript.md')).read_text()
+        self.assertIn('Synthetic Alice: Exact {{placeholder}} **speech**.\nСохрани 🌍.\nSecond line.\n\nspeaker_1: Done.', transcript)
+        self.assertEqual({p.name: p.read_bytes() for p in package.iterdir()}, original)
+        self.assertFalse(list(self.project.rglob('*.json')))
+
+    def test_native_approved_derived_hash_matches_actual_calendar_title_output(self):
+        self.native_package()
+        report = self.native_match()
+        candidate = self.data(report.stdout)['meetings'][0]['transcripts'][0]
+        path, approval = self.save_plan(report)
+        self.apply(path, approval)
+        output = next((self.project / 'meetings').glob('*/transcript.md')).read_bytes()
+        self.assertEqual(candidate['content_sha256'], hashlib.sha256(output).hexdigest())
+        self.assertEqual(candidate['title'], 'Planning')
+
+    def test_native_derived_context_tampering_is_not_an_approved_output(self):
+        self.native_package()
+        report = self.native_match()
+        path, approval = self.save_plan(report)
+        original = path.read_text()
+        tampered = original.replace('"title" = "Planning"\n"content_sha256"', '"title" = "Tampered"\n"content_sha256"')
+        self.assertNotEqual(tampered, original)
+        path.write_text(tampered)
+        self.apply(path, approval, ok=False)
+        approval = hashlib.sha256(path.read_bytes()).hexdigest()
+        result = self.apply(path, approval, ok=False)
+        self.assertIn('derived', result.stderr)
+        self.assertFalse((self.project / 'meetings').exists())
+
+    def test_native_changed_template_rejects_approval_without_publishing(self):
+        self.native_package()
+        copied = self.root / 'copied-skill'
+        shutil.copytree(SCRIPT.parent, copied / 'scripts', ignore=shutil.ignore_patterns('__pycache__'))
+        shutil.copytree(SCRIPT.parent.parent / 'templates', copied / 'templates')
+        with mock.patch(__name__ + '.SCRIPT', copied / 'scripts' / SCRIPT.name):
+            path, approval = self.save_plan(self.native_match())
+            template = copied / 'templates' / 'meeting-transcript.md'
+            original = template.read_text()
+            template.write_text(original.replace('- Participants: ', '- Participants: Modified '))
+            result = self.apply(path, approval, ok=False)
+            self.assertIn('derived', result.stderr)
+            self.assertFalse((self.project / 'meetings').exists())
+            template.write_text(original)
+            process = self.start_checkpoint(path, approval, 'before-exclusive-publish')
+            template.write_text(original.replace('- Participants: ', '- Participants: Modified '))
+            stdout, stderr = process.communicate('\n', timeout=10)
+            self.assertEqual(process.returncode, 2, stdout + stderr)
+            self.assertIn('derived', stderr)
+            self.assertFalse(list((self.project / 'meetings').glob('*/transcript.md')))
+
+    def test_native_fifo_inputs_are_pending_without_blocking_other_imports(self):
+        self.native_package('ready')
+        for filename in ('meta.json', 'transcript.json', 'speakers.json', 'transcribe.log'):
+            package = self.native_package('fifo_' + filename)
+            path = package / filename
+            path.unlink(missing_ok=True)
+            os.mkfifo(path)
+        initial = self.data(self.preview().stdout)
+        bad = [a for a in initial['artifacts'] if Path(a['path']).name.startswith('fifo_')]
+        self.assertTrue(all(a['status'] == 'unverified' and not a['transcripts'] for a in bad))
+        ready = next(a for a in initial['artifacts'] if Path(a['path']).name == 'ready')
+        event_key = initial['meetings'][0]['event']['key']
+        path, approval = self.save_plan(self.preview('--match', ready['id'] + '=' + event_key))
+        self.apply(path, approval)
+        self.assertEqual(len(list((self.project / 'meetings').glob('*/transcript.md'))), 1)
+
+    def test_native_unrepresentable_utterances_or_labels_remain_pending_without_rewriting(self):
+        variants = [('delimiter', 'Raw', 'First.\n\nOther: Synthetic speech.'), ('final_newline', 'Raw', 'Synthetic speech.\n'), ('label_newline', 'Raw\nLabel', 'Synthetic speech.'), ('label_colon', 'Raw:Label', 'Synthetic speech.')]
+        for name, label, text in variants:
+            self.native_package(name, segments=[dict(start_ms=0, end_ms=1000, speaker=label, text=text)])
+        plan = self.data(self.preview().stdout)
+        self.assertTrue(all(a['status'] == 'unverified' and not a['transcripts'] for a in plan['artifacts']))
+        self.assertEqual(plan['meetings'][0]['status'], 'pending')
+        self.assertFalse((self.project / 'meetings').exists())
+
+    def test_native_distinct_case_and_edge_space_labels_are_never_normalized_or_merged(self):
+        self.native_package(segments=[dict(start_ms=0, end_ms=1000, speaker='Alice', text='One.'), dict(start_ms=1000, end_ms=2000, speaker='ALICE', text='Two.'), dict(start_ms=2000, end_ms=3000, speaker=' Alice ', text='Three.')])
+        path, approval = self.save_plan(self.native_match())
+        self.apply(path, approval)
+        content = next((self.project / 'meetings').glob('*/transcript.md')).read_text()
+        self.assertIn('Alice: One.\n\nALICE: Two.\n\n Alice : Three.', content)
+        self.assertIn('- Participants: Alice, ALICE,  Alice \n', content)
+
+    def test_native_string_maps_and_unmatched_labels_preserve_spaces_and_timing_overshoot(self):
+        package = self.native_package(segments=[dict(start_ms=0, end_ms=4000000, speaker='Raw Label', text='  leading\n\n**Markdown** and {{title}} trailing  ')], speakers={'unused': 'Synthetic Display', 'also_unused': {'name': 'Other Display', 'source': 'fixture'}})
+        meta = json.loads((package / 'meta.json').read_text())
+        meta['duration_seconds'] = 3479.75
+        (package / 'meta.json').write_text(json.dumps(meta))
+        report = self.native_match()
+        self.assertEqual(self.data(report.stdout)['meetings'][0]['status'], 'ready')
+        path, approval = self.save_plan(report)
+        self.apply(path, approval)
+        content = next((self.project / 'meetings').glob('*/transcript.md')).read_text()
+        self.assertIn('- Participants: Raw Label\n', content)
+        self.assertTrue(content.endswith('Raw Label:   leading\n\n**Markdown** and {{title}} trailing  \n'))
+        self.assertNotIn('Synthetic Display', content)
+
+    def test_native_interval_requires_explicit_match_groups_obs_and_repeat_is_idempotent(self):
+        self.native_package()
+        recording = self.obs / 'recording.mkv'
+        recording.write_bytes(b'synthetic video')
+        self.metadata(recording, event=self.events[0])
+        initial = self.data(self.preview().stdout)
+        native = next(a for a in initial['artifacts'] if a['type'] == 'amanu')
+        self.assertEqual(native['event_key'], '')
+        self.assertEqual(native['candidates'], [initial['meetings'][0]['event']['key']])
+        self.assertEqual(initial['meetings'][0]['status'], 'pending')
+        self.assertEqual(initial['meetings'][0]['artifact_ids'], [next(a['id'] for a in initial['artifacts'] if a['type'] == 'obs')])
+        report = self.native_match('--rename', native['id'], '--idle-source', native['id'])
+        plan = self.data(report.stdout)
+        self.assertEqual(len(plan['meetings'][0]['artifact_ids']), 2)
+        self.assertFalse(next(a for a in plan['artifacts'] if a['type'] == 'amanu')['safe'])
+        self.assertIn('verified idle', next(a for a in plan['artifacts'] if a['type'] == 'amanu')['rename_blocked'])
+        path, approval = self.save_plan(report)
+        self.apply(path, approval, '--allow-source-renames')
+        transcript = next((self.project / 'meetings').glob('*/transcript.md'))
+        before = transcript.stat().st_mtime_ns
+        report = self.preview('--until', '2026-08-03T00:00:00Z', start=False)
+        repeated = self.data(report.stdout)
+        self.assertEqual(repeated['meetings'][0]['status'], 'imported')
+        self.assertEqual(len(repeated['meetings'][0]['artifact_ids']), 2)
+        path, approval = self.save_plan(report)
+        self.apply(path, approval)
+        self.assertEqual(transcript.stat().st_mtime_ns, before)
+        self.assertEqual(len(list((self.project / 'meetings').glob('*/transcript.md'))), 1)
+
+    def test_native_requires_positive_completion_matching_snapshot_and_no_later_rerun(self):
+        variants = {
+            'missing': None,
+            'empty': '',
+            'bad_count': '2026-08-01T10:01:00Z done — 99 segments\n',
+            'stale': '2026-08-01T10:00:59Z done — 3 segments\n',
+            'rerun': '2026-08-01T10:01:00Z done — 3 segments\n2026-08-01T10:02:00Z transcribing synthetic-input\n',
+            'not_done': '2026-08-01T10:01:00Z transcribing synthetic-input\n',
+        }
+        for name, log in variants.items():
+            package = self.native_package(name)
+            if log is None:
+                (package / 'transcribe.log').unlink()
+            else:
+                (package / 'transcribe.log').write_text(log)
+        plan = self.data(self.preview().stdout)
+        self.assertTrue(all(not a['transcripts'] for a in plan['artifacts']))
+        self.assertEqual(plan['meetings'][0]['status'], 'pending')
+        self.assertTrue(all(not a['safe'] for a in plan['artifacts']))
+
+    def test_native_raw_input_edits_invalidate_exact_approval(self):
+        package = self.native_package(speakers={'speaker_0': {'name': 'Synthetic Alice', 'source': 'manual'}})
+        for filename in ('meta.json', 'transcript.json', 'speakers.json', 'transcribe.log'):
+            with self.subTest(filename=filename):
+                report = self.native_match()
+                path, approval = self.save_plan(report)
+                source = package / filename
+                original = source.read_bytes()
+                source.write_bytes(original + b' ')
+                result = self.apply(path, approval, ok=False)
+                self.assertIn('changed', result.stderr)
+                self.assertFalse((self.project / 'meetings').exists())
+                source.write_bytes(original)
+        (package / 'speakers.json').unlink()
+        path, approval = self.save_plan(self.native_match())
+        (package / 'speakers.json').write_text(json.dumps(dict(created_at='2026-08-01T10:02:00Z', speakers={})))
+        self.apply(path, approval, ok=False)
+        self.assertFalse((self.project / 'meetings').exists())
+
+    def test_native_rechecks_raw_inputs_immediately_before_publication(self):
+        package = self.native_package()
+        plan, approval = self.save_plan(self.native_match())
+        process = self.start_checkpoint(plan, approval, 'before-exclusive-publish')
+        source = package / 'transcript.json'
+        source.write_bytes(source.read_bytes() + b' ')
+        stdout, stderr = process.communicate('\n', timeout=10)
+        self.assertEqual(process.returncode, 2, stdout + stderr)
+        self.assertIn('changed', stderr)
+        self.assertFalse(list((self.project / 'meetings').glob('*/transcript.md')))
+        self.assertFalse(list(self.settings.glob('.calendar-import-*')))
+
+    def test_native_invalid_packages_stay_pending_without_blocking_ready_meeting(self):
+        self.package()
+        invalids = [
+            ('empty', 'transcript.json', dict(created_at='2026-08-01T10:01:00Z', engine='fixture', model='fixture', segments=[])),
+            ('active', 'meta.json', dict(started='2026-08-01T09:01:00Z', duration_seconds=100)),
+            ('bad_duration', 'meta.json', dict(started='2026-08-01T09:01:00Z', ended='2026-08-01T09:59:00Z', duration_seconds=True)),
+            ('bad_speakers', 'speakers.json', dict(created_at='2026-08-01T10:01:00Z', speakers={'speaker_0': 42})),
+            ('null_speakers', 'speakers.json', None),
+            ('bad_label', 'speakers.json', dict(created_at='2026-08-01T10:01:00Z', speakers={'speaker_0': 'Not: representable'})),
+            ('bad_segment', 'transcript.json', dict(created_at='2026-08-01T10:01:00Z', engine='fixture', model='fixture', segments=[dict(start_ms=False, end_ms=1000, speaker='raw', text='Synthetic text')])),
+        ]
+        for name, filename, data in invalids:
+            package = self.native_package(name)
+            (package / filename).write_text(json.dumps(data))
+        partial = self.native_package('partial')
+        (partial / 'transcript.json').write_text('{"segments":[')
+        plan = self.data(self.preview().stdout)
+        self.assertEqual(plan['meetings'][0]['status'], 'ready')
+        native_artifacts = [a for a in plan['artifacts'] if Path(a['path']).name != 'package']
+        self.assertEqual(len(native_artifacts), len(invalids) + 1)
+        self.assertTrue(all(a['status'] == 'unverified' and not a['transcripts'] for a in native_artifacts))
+        path, approval = self.save_plan(self.preview())
+        self.apply(path, approval)
+        self.assertEqual(len(list((self.project / 'meetings').glob('*/transcript.md'))), 1)
+
+    def fake_ffprobe(self, payload):
+        binary_dir = self.root / 'bin'
+        binary_dir.mkdir(exist_ok=True)
+        binary = binary_dir / 'ffprobe'
+        binary.write_text('#!' + sys.executable + '\nimport json, os, sys\nassert "FFREPORT" not in os.environ\nassert sys.argv[1:] == ["-v", "error", "-show_entries", "format=duration:format_tags=creation_time", "-of", "json", "-protocol_whitelist", "file", "-i", ' + repr(str((self.obs / 'raw.mov').resolve())) + ']\nprint(' + repr(json.dumps(payload)) + ')\n')
+        binary.chmod(0o700)
+        return {'PATH': str(binary_dir), 'FFREPORT': 'file=should-never-exist.log'}
+
+    def test_native_obs_missing_or_invalid_probe_stays_pending_with_filename_evidence(self):
+        recording = self.obs / 'raw.mov'
+        recording.write_bytes(b'synthetic container bytes')
+        self.events[0]['title'] = 'raw'
+        self.save_calendar()
+        variants = [{}, {'format': {'duration': 'NaN', 'tags': {'creation_time': '2026-08-01T09:01:00Z'}}}, {'format': {'duration': '-1', 'tags': {'creation_time': '2026-08-01T09:01:00Z'}}}, {'format': {'duration': True, 'tags': {'creation_time': '2026-08-01T09:01:00Z'}}}, {'format': {'duration': '100', 'tags': {'creation_time': '2026-08-01T09:01:00'}}}]
+        for index in range(len(variants) + 1):
+            with self.subTest(index=index):
+                env = {'PATH': ''} if index == 0 else self.fake_ffprobe(variants[index - 1])
+                plan = self.data(self.preview(env=env).stdout)
+                artifact = plan['artifacts'][0]
+                self.assertEqual(artifact['status'], 'unverified')
+                self.assertEqual(artifact['candidates'], [plan['meetings'][0]['event']['key']])
+                self.assertEqual(artifact['event_key'], '')
+                self.assertIn('filename title only', ' '.join(artifact['evidence']))
+                self.assertEqual(plan['meetings'][0]['status'], 'pending')
+        self.assertFalse((self.project / 'meetings').exists())
+
+    def test_native_both_sources_group_only_after_explicit_choices(self):
+        self.native_package()
+        recording = self.obs / 'raw.mov'
+        recording.write_bytes(b'synthetic container bytes')
+        env = self.fake_ffprobe(dict(format=dict(duration='3480.25', tags=dict(creation_time='2026-08-01T09:01:00+00:00'))))
+        first = self.data(self.preview(env=env).stdout)
+        self.assertTrue(all(not a['event_key'] for a in first['artifacts']))
+        event_key = first['meetings'][0]['event']['key']
+        flags = [value for artifact in first['artifacts'] for value in ('--match', artifact['id'] + '=' + event_key)]
+        report = self.preview(*flags, env=env)
+        meeting = self.data(report.stdout)['meetings'][0]
+        self.assertEqual(len(meeting['artifact_ids']), 2)
+        self.assertEqual(meeting['status'], 'ready')
+        path, approval = self.save_plan(report)
+        self.apply(path, approval, env=env)
+        self.assertEqual(len(list((self.project / 'meetings').glob('*/transcript.md'))), 1)
+        self.assertTrue(recording.exists())
+
+    def test_native_obs_container_timing_is_candidate_not_automatic_identity_or_idle(self):
+        recording = self.obs / 'raw.mov'
+        recording.write_bytes(b'synthetic container bytes')
+        env = self.fake_ffprobe(dict(format=dict(duration='3480.25', tags=dict(creation_time='2026-08-01T09:01:00Z'))))
+        first = self.data(self.preview(env=env).stdout)
+        artifact = first['artifacts'][0]
+        event_key = first['meetings'][0]['event']['key']
+        self.assertEqual(artifact['status'], 'verified')
+        self.assertEqual(artifact['candidates'], [event_key])
+        self.assertEqual(artifact['event_key'], '')
+        self.assertFalse(artifact['safe'])
+        self.assertIn('container', ' '.join(artifact['evidence']))
+        report = self.preview('--match', artifact['id'] + '=' + event_key, '--rename', artifact['id'], '--idle-source', artifact['id'], env=env)
+        self.assertIn('verified idle', self.data(report.stdout)['artifacts'][0]['rename_blocked'])
+        plan, approval = self.save_plan(report)
+        recording.write_bytes(b'changed source bytes')
+        self.assertIn('source changed', self.apply(plan, approval, ok=False).stderr)
+        self.assertTrue(recording.exists())
 
     def test_preview_uses_bound_calendar_and_timezone_without_writes(self):
         recording = self.obs / '2026-08-01 09-00 Planning.mkv'

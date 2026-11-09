@@ -96,9 +96,15 @@ Every run must include fresh data for all known non-declined events as well as t
 
 An incomplete fetch must not be presented as a complete envelope. The script cannot attest that the provider's caller fetched all pages, and an empty envelope is not evidence that authentication or acquisition succeeded.
 
-## Tested normalized artifact contract — not a native Amanu contract
+## Native recording sources
 
-The current tested adapter recognizes explicitly normalized metadata:
+Native Amanu uses the observed `meta.json`, `transcript.json`, and optional `speakers.json` contract described in [native-recordings.md](native-recordings.md). Its timestamped native Markdown is not assumed to be canonical. Conversion reads validated structured segments and preserves source text in canonical Markdown without creating adapter files in the package. Unchanged raw inputs and derived output are checked again at apply.
+
+Native recording interval or OBS container timing can produce candidate events, but interval proximity alone does not assign a meeting. Use explicit match choices when native sources lack verified event identity or a true meeting title. Unknown native idle status blocks source renaming even when transcript import is allowed. Neither a user download nor an import request is idle attestation.
+
+## Normalized artifact contract
+
+The workflow also retains support for explicitly normalized metadata:
 
 - OBS: a sibling named `<recording-filename>.meeting.toml`.
 - Amanu: `meeting-import.toml` inside the top-level package.
@@ -117,11 +123,11 @@ event_id = "stable-provider-event-id"
 recurrence_id = ""
 ```
 
-The optional transcript field is supported only inside Amanu packages. Its path must be package-relative and refer to an existing **canonical** meeting-transcript Markdown document. The script validates that document and uses the existing importer. It does not convert unverified native Amanu JSON/plain-Markdown formats.
+For this normalized sidecar contract, the optional transcript field is supported only inside Amanu packages. Its path must be package-relative and refer to an existing **canonical** meeting-transcript Markdown document. The native Amanu adapter is separate and validates observed JSON segments; unknown native formats and guessed Markdown parsers remain unsupported.
 
 The optional event table supports exact event identity matching. Otherwise automatic association requires exact case-insensitive metadata title plus intersecting timezone-aware recording/event intervals. Filename-title evidence alone requires an explicit match. No nearest-event scoring or undocumented time tolerance is used. Identical transcript bytes are deduplicated; different ready transcripts require selection.
 
-Unknown, malformed, unreadable, or native-only metadata remains unverified/pending. Do not create normalized metadata in real source directories to bypass verification or manufacture idle evidence. The tested normalized schema does not demonstrate that real Amanu exports conform to it.
+Unknown, malformed, unreadable, or unsupported native metadata remains unverified/pending. Do not create normalized metadata in real source directories to bypass verification or manufacture idle evidence. The normalized schema and the separately observed native schema are distinct contracts; neither implies idle safety for the other.
 
 OBS normalized sidecars are not renamed with videos. The project state preserves their original metadata paths; these files are an external adapter input, not a source file the workflow creates automatically.
 

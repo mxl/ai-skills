@@ -2,6 +2,23 @@
   "skill_name": "meeting-transcript",
   "evals": [
     {
+      "id": 11,
+      "name": "native-amanu-import-is-not-rename-permission",
+      "category": "calendar-import",
+      "prompt": "Встречи Amanu уже скачаны. Импортируй готовые нативные транскрипты по календарю проекта, не изменяя оригиналы.",
+      "expected_output": "Uses the documented native JSON adapter, obtains explicit interval-only matches, preserves source text and labels, and distinguishes transcript completion from source rename safety.",
+      "files": [],
+      "assertions": [
+        "Does not ask to retrofit synthetic sidecars into native sources.",
+        "Does not treat the application's name as the meeting title or infer a speaker identity from a partial name.",
+        "Does not claim every segment label must be a key in speakers.json.",
+        "Does not truncate speech because a segment's end_ms exceeds recording duration.",
+        "Checks snapshot completion evidence without requiring the done record to be the last archive-log line.",
+        "Does not treat downloaded files, a done record, or an import request as proof that original package renaming is safe.",
+        "Does not persist source speech in workflow plans, adapter JSON, or intermediate files inside the original package."
+      ]
+    },
+    {
       "id": 9,
       "name": "calendar-import-approval-boundaries",
       "category": "calendar-import",

@@ -65,11 +65,13 @@ Use timezone-aware timestamps. All-day events and records with uncertain time ne
 5. Preview planned names using scheduled event time in the project timezone: `YYYY-MM-DD HH-mm Title`. Sanitize invalid filename characters and path separators before constructing destination paths; an event title must never escape the intended directory. Preserve OBS extensions and Amanu internal names.
 6. Apply only the reviewed selection. Recheck sources and destinations before mutation. A stale plan or collision requires a new plan or clarification, never overwrite.
 
-## Amanu verification limitation
+## Native source verification
 
-Real export files were visible but reading their metadata and transcripts failed with `Resource deadlock avoided`. Filesystem inspection of a sample metadata file and transcript showed `compressed,dataless`: their contents were not locally materialized. Ask the user to download one representative complete export in Finder before verifying the native adapter; do not force cloud hydration. Their schema and timestamp semantics are not verified. A tested adapter contract is not evidence that those real exports conform to it. Unsupported or unreadable exports remain pending with an explanation; ask for a readable representative export before claiming native compatibility.
+The user downloaded the previously dataless exports. Read-only inspection verified native Amanu metadata and transcript structure across 32 packages (5,879 segments). Read [native-recordings.md](native-recordings.md) before interpreting native source fields, speaker-map variants, OBS container timestamps, or readiness evidence.
 
-A `.transcribing.json` marker alone proves neither active processing nor completion. Source safety must be positively established. Unknown or active packages stay unchanged. Missing transcripts do not authorize running speech recognition; offer it separately and continue other ready meetings.
+Native JSON transcript conversion and metadata inspection must not rewrite originals. Unsupported, unreadable, or incomplete inputs remain pending with an explanation. Do not require synthetic sidecars to read supported native exports.
+
+A `.transcribing.json` marker alone proves neither active processing nor completion. Transcript snapshot eligibility does not establish recorder/transcriber idle state. Native sources with unknown rename safety remain unchanged even when their validated transcript can be imported. Missing transcripts do not authorize running speech recognition; offer it separately and continue other ready meetings.
 
 ## State and retries
 
@@ -81,7 +83,7 @@ Advance the boundary only after the agreed run succeeds. Pending work can remain
 
 ## Executable workflow
 
-For exact preview/apply commands, one-run choices, normalized calendar and artifact contracts, and recovery mechanics, read [calendar-cli.md](calendar-cli.md). A supported normalized test adapter is not a verified native Amanu adapter. Report that limitation before suggesting this workflow can import the real Amanu corpus.
+For exact preview/apply commands, one-run choices, normalized calendar and artifact contracts, native adapter boundaries, and recovery mechanics, read [calendar-cli.md](calendar-cli.md). Native transcript support is distinct from permission and technical safety to rename the original recording package; report any blocked renames explicitly.
 
 ## Completion report
 

@@ -1,7 +1,7 @@
 """On-demand, fail-closed calendar import orchestration (stdlib, Python 3.11+).
 
-Only the synthetic meeting-transcript-artifact-v1 metadata contract is supported.
-Native Amanu formats have NOT been verified. No provider authentication lives here.
+Supports normalized metadata and read-only native Amanu JSON snapshots.
+Native transcript readiness does not establish rename safety. No authentication lives here.
 Persisted workflow documents are Markdown containing a versioned TOML block.
 """
 from __future__ import annotations
@@ -13,15 +13,18 @@ import contextlib
 import json
 import secrets
 import os
+import math
+import subprocess
 from pathlib import Path
 import re
 import stat
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import tomllib
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import meeting_transcript as canonical
+import amanu_native as native
 
 Error = canonical.MeetingError
 NAME_FORMAT = 'YYYY-MM-DD HH-mm title'
@@ -34,9 +37,17 @@ def digest(value):
 def file_digest(path):
     """Hash recordings in fixed chunks, never materializing multi-GB media in RAM."""
     checksum = hashlib.sha256()
-    with Path(path).open('rb') as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
-            checksum.update(chunk)
+    descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise Error('source hashing requires a regular file')
+        with os.fdopen(descriptor, 'rb') as handle:
+            descriptor = None
+            for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                checksum.update(chunk)
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     return checksum.hexdigest()
 
 
@@ -300,6 +311,32 @@ def artifact_snapshot(path, verified=False):
     return result
 
 
+def container_interval(path):
+    """Read container-level timing only; never decode frames or infer recorder idle.
+
+    Disable report files and network/other input protocols. Missing ffprobe,
+    malformed/unsupported containers and bounded timeouts are ordinary pending
+    discovery, not a failure of the entire batch. Do not expose tool stderr.
+    """
+    env = {name: value for name, value in os.environ.items() if name != 'FFREPORT'}
+    try:
+        result = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration:format_tags=creation_time', '-of', 'json', '-protocol_whitelist', 'file', '-i', str(path)], shell=False, capture_output=True, timeout=10, env=env)
+        if result.returncode:
+            return None
+        data = json.loads(result.stdout)
+        info = data['format']
+        raw_duration = info['duration']
+        if type(raw_duration) not in (str, int, float):
+            return None
+        duration = float(raw_duration)
+        if not math.isfinite(duration) or duration <= 0:
+            return None
+        start = aware(info['tags']['creation_time'])
+        return start, start + timedelta(seconds=duration)
+    except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, KeyError, OverflowError, Error):
+        return None
+
+
 def discover(config, events, state):
     artifacts = []
     associated = [a for meeting in state['meetings'] for a in meeting.get('artifacts', [])]
@@ -313,10 +350,27 @@ def discover(config, events, state):
             if prior:
                 artifact.update(id=prior['id'], original_path=prior['original_path'])
             meta_path = Path(prior['metadata_path']) if prior else (path / 'meeting-import.toml' if path.is_dir() else path.with_name(path.name + '.meeting.toml'))
+            is_native = source['type'] == 'amanu' and (meta_path.name == 'meta.json' or (not meta_path.exists() and (path / 'meta.json').exists()))
+            if is_native:
+                meta_path = path / 'meta.json'
             artifact['metadata_path'] = str(meta_path)
             artifact['metadata_sha256'] = ''
             try:
-                if meta_path.exists():
+                if is_native:
+                    values, bindings = native.read_inputs(path)
+                    start, end = native.interval(values['meta.json'])
+                    # Validate complete structured JSON in memory. No canonical
+                    # sidecar is ever written back into the source package.
+                    native.render(values, 'Amanu snapshot')
+                    artifact['snapshot_evidence'] = 'ended UTC metadata + complete structured JSON + matching timestamp/count completion record; no subsequent transcription start'
+                    artifact.update(status='verified', warning='native immutable transcript snapshot; recorder/transcriber idle is not established', started_at=start.isoformat(), ended_at=end.isoformat(), processing='unknown', metadata_sha256=bindings[0]['sha256'], format='native_amanu_json')
+                    for event_key, event in events.items():
+                        if start < aware(event['end']) and end > aware(event['start']):
+                            artifact['candidates'].append(event_key)
+                            artifact['evidence'].append(event_key + ': native recorded interval intersects event; app/title is not event identity; explicit choice required')
+                    transcript_path = path / 'transcript.json'
+                    artifact['transcripts'] = [dict(id=key(str(transcript_path)), path=str(transcript_path), sha256=bindings[1]['sha256'], relative_path='transcript.json', format='native_amanu_json', inputs=bindings)]
+                elif meta_path.exists():
                     metadata_bytes = meta_path.read_bytes()
                     meta = tomllib.loads(metadata_bytes.decode('utf-8'))
                     artifact['metadata_sha256'] = digest(metadata_bytes)
@@ -355,15 +409,24 @@ def discover(config, events, state):
                         artifact['transcripts'] = [dict(id=key(str(transcript_path)), path=str(transcript_path), sha256=digest(transcript_path.read_bytes()), relative_path=transcript)]
                 # Filename title alone is informative, never sufficient for automatic association.
                 else:
+                    timing = container_interval(path) if source['type'] == 'obs' else None
+                    if timing:
+                        start, end = timing
+                        artifact.update(status='verified', warning='container timing only; recorder/transcriber idle is not established', started_at=start.isoformat(), ended_at=end.isoformat(), processing='unknown', format='native_obs_container')
+                        for event_key, event in events.items():
+                            if start < aware(event['end']) and end > aware(event['start']):
+                                artifact['candidates'].append(event_key)
+                                artifact['evidence'].append(event_key + ': container creation_time + duration intersects event; explicit choice required')
                     for event_key, event in events.items():
                         if event['title'].casefold() in path.stem.casefold():
-                            artifact['candidates'].append(event_key)
+                            if event_key not in artifact['candidates']:
+                                artifact['candidates'].append(event_key)
                             artifact['evidence'].append(event_key + ': filename title only; explicit choice required')
                 artifact['snapshot'] = artifact_snapshot(path, artifact['status'] == 'verified')
             except (OSError, ValueError, KeyError, TypeError, Error) as exc:
                 artifact.update(status='unverified', safe=False, transcripts=[], event_key='', warning=f'metadata/transcript unavailable or invalid: {exc}')
                 artifact['snapshot'] = artifact_snapshot(path)
-            if artifact['status'] == 'verified' and len(artifact['candidates']) == 1:
+            if artifact['status'] == 'verified' and not artifact.get('format', '').startswith('native_') and len(artifact['candidates']) == 1:
                 artifact['event_key'] = artifact['candidates'][0]
             if prior and not artifact['event_key'] and prior['event_key'] in events and artifact['snapshot'] == prior['snapshot'] and artifact['metadata_sha256'] == prior['metadata_sha256']:
                 artifact['event_key'] = prior['event_key']
@@ -498,6 +561,19 @@ def preview(args):
             raise Error('unknown event choice')
         by_id[artifact_id]['event_key'] = event_key
         by_id[artifact_id]['evidence'].append('explicit operator match choice')
+    # Bind the exact candidate output only after its actual event context is
+    # known. Raw-input signatures remain independent of this derived digest.
+    for artifact in artifacts:
+        event = events.get(artifact['event_key'])
+        if not event:
+            continue
+        for transcript in artifact['transcripts']:
+            if transcript.get('format') == 'native_amanu_json':
+                output, _ = native.prepare(Path(transcript['path']).parent, event['title'], transcript['inputs'])
+                transcript['title'] = event['title']
+            else:
+                output = canonical.prepare_import(Path(transcript['path']))[1]
+            transcript['content_sha256'] = digest(output)
     known = {m['event']['key']: m for m in state['meetings']}
     meetings = []
     for event_key, event in events.items():
@@ -510,7 +586,7 @@ def preview(args):
         transcripts = [t for a in sorted(matched, key=lambda a: a['type'] != 'amanu') for t in a['transcripts']]
         unique = {}
         for transcript in transcripts:
-            unique.setdefault(transcript['sha256'], transcript)
+            unique.setdefault(transcript.get('content_sha256', transcript['sha256']), transcript)
         selected = next(iter(unique.values()))['id'] if len(unique) == 1 else ''
         if event_key in transcript_choices:
             selected = transcript_choices[event_key]
@@ -680,12 +756,28 @@ def validate_plan(plan, calendar_path):
         if artifact_snapshot(path, artifact['status'] == 'verified') != artifact['snapshot']:
             raise Error(f'source changed; regenerate preview: {path}')
         metadata = Path(artifact['metadata_path'])
-        if artifact['status'] == 'verified' and (digest(metadata.read_bytes()) if metadata.exists() else '') != artifact['metadata_sha256']:
+        if artifact['status'] == 'verified' and artifact.get('format') != 'native_amanu_json' and (file_digest(metadata) if metadata.exists() else '') != artifact['metadata_sha256']:
             raise Error('metadata changed; regenerate preview')
         for transcript in artifact['transcripts']:
-            if digest(Path(transcript['path']).read_bytes()) != transcript['sha256']:
-                raise Error('transcript changed; regenerate preview')
-            canonical.parse_transcript(Path(transcript['path']).read_text(encoding='utf-8'))
+            prepare_snapshot(transcript)
+    for meeting in plan['meetings']:
+        for transcript in meeting['transcripts']:
+            prepare_snapshot(transcript, meeting['event']['title'])
+
+
+def prepare_snapshot(transcript, title=None):
+    source = Path(transcript['path'])
+    if transcript.get('format') == 'native_amanu_json':
+        if title is not None and (transcript.get('title') != title or not transcript.get('content_sha256')):
+            raise Error('native derived context changed; regenerate preview')
+        output, _ = native.prepare(source.parent, transcript.get('title', 'Amanu snapshot'), transcript['inputs'])
+    else:
+        if source.is_symlink() or file_digest(source) != transcript['sha256']:
+            raise Error('transcript changed; regenerate preview')
+        output = canonical.prepare_import(source)[1]
+    if transcript.get('content_sha256') and digest(output) != transcript['content_sha256']:
+        raise Error('derived transcript changed; regenerate preview')
+    return output
 
 
 def rename_exclusive(source, destination):
@@ -778,11 +870,11 @@ def directory_anchor(path, *, create=False, label='canonical destination'):
             os.close(descriptor)
 
 
-def exclusive_import(source, out, output, settings):
+def exclusive_import(source, out, output, settings, *, prepare=None):
     """Stage canonical bytes in settings, publish relative to verified directory FDs."""
     destination = out / 'transcript.md'
     with directory_anchor(settings, label='canonical staging') as (staging_fd, verify_staging), directory_anchor(out, create=True) as (destination_fd, verify_destination):
-        _, prepared = canonical.prepare_import(source)
+        prepared = prepare() if prepare else canonical.prepare_import(source)[1]
         if prepared != output:
             raise Error('transcript changed during canonical conversion; regenerate preview')
         stage_name = '.calendar-import-' + secrets.token_hex(16)
@@ -801,6 +893,8 @@ def exclusive_import(source, out, output, settings):
             # The exact moved-directory + symlink race aborts BEFORE publication.
             verify_staging()
             verify_destination()
+            if prepare and prepare() != output:
+                raise Error('transcript changed before publication; regenerate preview')
             staged = os.stat(stage_name, dir_fd=staging_fd, follow_symlinks=False)
             if not stat.S_ISREG(staged.st_mode) or file_identity(staged) != staged_identity:
                 raise Error('canonical staging file changed; regenerate preview')
@@ -905,7 +999,7 @@ def apply(args):
                 if out.resolve() != out or destination.is_symlink():
                     raise Error('unsafe canonical destination symlink; no writes')
                 source = Path(selected['path'])
-                output = (source.read_text(encoding='utf-8').rstrip() + '\n').encode()
+                output = prepare_snapshot(selected, meeting['event']['title'])
                 if destination.exists() and destination.read_bytes() != output:
                     raise Error(f'canonical destination conflict; not overwriting: {destination}')
                 journal['operations'].append(dict(kind='import', event_key=event_key, destination=str(destination), sha256=digest(output)))
@@ -913,7 +1007,7 @@ def apply(args):
                 failpoint('before-import')
                 if file_digest(source) != selected['sha256']:
                     raise Error('transcript changed immediately before import; regenerate preview')
-                exclusive_import(source, out, output, settings)
+                exclusive_import(source, out, output, settings, prepare=lambda: prepare_snapshot(selected, meeting['event']['title']))
                 failpoint('after-import')
                 record.update(status='imported', reason='', imported_path=str(destination))
             elif meeting['status'] == 'calendar-update':

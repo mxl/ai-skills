@@ -107,14 +107,14 @@ def collapse_turns(entries: list[dict]) -> list[dict]:
     return turns
 
 
-def render_transcript(meeting: dict) -> str:
+def render_transcript(meeting: dict, *, preserve_entries: bool = False) -> str:
     """Render in-memory source data with the current transcript template."""
     title = str(meeting.get("title") or "Untitled meeting").replace("\n", " ").strip()
     source = str(meeting.get("source") or "unknown").replace("\n", " ").strip()
     started_at = str(meeting.get("started_at") or "")
     ended_at = str(meeting.get("ended_at") or "")
-    participants = ", ".join(display_participant(item) for item in meeting.get("participants", [])) or "Unknown"
-    turns = collapse_turns(meeting.get("transcript", []))
+    participants = ", ".join(item['name'] if preserve_entries else display_participant(item) for item in meeting.get("participants", [])) or "Unknown"
+    turns = meeting.get("transcript", []) if preserve_entries else collapse_turns(meeting.get("transcript", []))
     if not turns:
         raise MeetingError("meeting must contain transcript entries")
     values = {
@@ -128,12 +128,12 @@ def render_transcript(meeting: dict) -> str:
         "transcript_body": "\n\n".join(f"{item['speaker']}: {item['text']}" for item in turns),
     }
     rendered = read_text(TRANSCRIPT_TEMPLATE)
-    for key, value in values.items():
-        rendered = rendered.replace("{{" + key + "}}", value)
-    unresolved = re.findall(r"{{\s*[^}]+\s*}}", rendered)
-    if unresolved:
-        raise MeetingError(f"unresolved transcript template placeholders: {', '.join(unresolved)}")
-    return rendered.rstrip() + "\n"
+    # Validate the template, never reinterpret literal placeholders in source speech.
+    placeholders = re.findall(r"{{\s*([^}]+?)\s*}}", rendered)
+    if any(name not in values for name in placeholders):
+        raise MeetingError("unresolved transcript template placeholders")
+    rendered = re.sub(r"{{\s*([^}]+?)\s*}}", lambda match: values[match[1]], rendered)
+    return rendered if preserve_entries else rendered.rstrip() + "\n"
 
 
 def parse_transcript(content: str) -> dict:

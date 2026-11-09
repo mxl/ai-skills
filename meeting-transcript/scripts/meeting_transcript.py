@@ -299,7 +299,7 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument("--decline", action="append", default=[], help="event-key")
     preview.add_argument("--select", action="append", help="event-key; default all visible meetings")
     preview.add_argument("--rename", action="append", default=[], help="artifact-id")
-    preview.add_argument("--idle-source", action="append", default=[], help="artifact-id: explicit operator idle attestation")
+    preview.add_argument("--idle-source", action="append", default=[], help="artifact-id: attest owning recorder/transcriber is idle and will not restart for this selected source until the operation finishes")
     preview.add_argument("--accept-update", action="append", default=[], help="event-key")
     preview.set_defaults(func=calendar_command)
     apply = operations.add_parser("apply", help="apply an exact approved Markdown preview")

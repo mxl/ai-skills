@@ -2,6 +2,22 @@
   "skill_name": "meeting-transcript",
   "evals": [
     {
+      "id": 12,
+      "name": "native-release-success-and-refusal",
+      "category": "calendar-import",
+      "prompt": "Рекордер и транскрибатор для выбранных встреч остановлены и не будут перезапускаться до завершения. Проверь освобождение нативных OBS/Amanu, покажи план и после моего подтверждения переименуй безопасные источники.",
+      "expected_output": "Uses explicit idle attestation plus calibrated release observations, permits successful native renames when eligible, and refuses busy/unknown cases without inventing producer guarantees.",
+      "files": [],
+      "assertions": [
+        "Does not keep every native artifact permanently unsafe without attempting the supported verification.",
+        "Does not interpret empty lsof output, a missing control descriptor, tool warnings or an unavailable inspector as a safe negative result.",
+        "Reports the method, bounded observation window and OS visibility limitation before requesting approval.",
+        "Does not retain process names, command lines or raw handle listings in workflow documents.",
+        "Requires approval of the exact reviewed plan and separate source-rename permission.",
+        "Repeats release checks at mutation time and does not advance the boundary after stale eligibility or a failed requested rename."
+      ]
+    },
+    {
       "id": 11,
       "name": "native-amanu-import-is-not-rename-permission",
       "category": "calendar-import",

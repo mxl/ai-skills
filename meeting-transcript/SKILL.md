@@ -2,7 +2,7 @@
 name: meeting-transcript
 description: Always use for `$meeting import ...` and `$meeting summarize ...`. Also use for calendar-linked discovery of meeting recordings in OBS/Amanu and previewing their rename plans; whenever the user asks to import, save, process, organize, summarize, improve, or verify meeting transcripts or meeting notes; references a meeting by path, title, date, or participant; pastes raw transcript text; or wants meeting action items connected to a project, opportunity, area, or person. `$meeting import` performs deterministic Markdown transcript import. `$meeting summarize` performs project-aware verification and writes the final Markdown summary in the current agent. Use job-search instead for job-search interview notes explicitly tied to an opportunity.
 license: MIT
-compatibility: opencode; Python 3.11+ for calendar synchronization
+compatibility: opencode; Python 3.11+ for calendar synchronization; lsof for native release checks; ffprobe for OBS metadata
 metadata:
   audience: agents
   domain: meetings

@@ -71,7 +71,7 @@ The user downloaded the previously dataless exports. Read-only inspection verifi
 
 Native JSON transcript conversion and metadata inspection must not rewrite originals. Unsupported, unreadable, or incomplete inputs remain pending with an explanation. Do not require synthetic sidecars to read supported native exports.
 
-A `.transcribing.json` marker alone proves neither active processing nor completion. Transcript snapshot eligibility does not establish recorder/transcriber idle state. Native sources with unknown rename safety remain unchanged even when their validated transcript can be imported. Missing transcripts do not authorize running speech recognition; offer it separately and continue other ready meetings.
+A `.transcribing.json` marker alone proves neither active processing nor completion. Transcript snapshot eligibility does not establish recorder/transcriber idle state. For a requested native rename, read [native-release.md](native-release.md) and run its calibrated release checks; successful observed quiescence plus operator attestation permits renaming. Busy, changed or unobservable sources remain unchanged even when their validated transcript can be imported. Missing transcripts do not authorize running speech recognition; offer it separately and continue other ready meetings.
 
 ## State and retries
 

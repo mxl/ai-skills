@@ -48,7 +48,9 @@ Generate a new preview with the user's choices, then present that exact resultin
 
 Without `--select`, all visible meetings are selected; applying that plan therefore requires approval of the displayed full batch. Unselected meetings remain pending rather than disappearing behind the watermark. Explicit declines are persisted and suppressed later.
 
-`--idle-source` is an operator attestation. Ask the user to establish that the recorder/transcriber is idle; never manufacture attestation from file timestamps, marker absence, or an import request. Validated idle metadata and this independent attestation are both required for source renames. A pending or blocked rename remains unchanged and must be reported.
+`--idle-source` is an operator attestation scoped to the selected artifact: its owning recorder/transcriber is idle and will not restart until the rename finishes. Never manufacture attestation from file timestamps, marker absence, or an import request. Normalized sources require validated idle metadata; native sources require the independent [observed-release checks](native-release.md) as well as this attestation. A pending or blocked rename remains unchanged and must be reported.
+
+For a native source, the existing `--rename ARTIFACT_ID` plus user-backed `--idle-source ARTIFACT_ID` choices trigger release observation during the next preview. No force-safe flag or synthetic sidecar is needed. The returned `release_proof` contains the observation status, method/scope, timing, inventory fingerprint and aggregate scan results. Only an eligible result clears `rename_blocked`; apply independently repeats the checks. The local `lsof` tool is required for native release verification, and `ffprobe` is additionally required for OBS container evidence. Unavailable tools produce an unknown result, not permission to rename.
 
 `--accept-update` accepts the displayed changed calendar values for a known event. It does not by itself authorize renaming; ordinary rename selection and safety requirements still apply. Canonical transcript content is not rewritten to follow a calendar edit.
 
@@ -100,7 +102,7 @@ An incomplete fetch must not be presented as a complete envelope. The script can
 
 Native Amanu uses the observed `meta.json`, `transcript.json`, and optional `speakers.json` contract described in [native-recordings.md](native-recordings.md). Its timestamped native Markdown is not assumed to be canonical. Conversion reads validated structured segments and preserves source text in canonical Markdown without creating adapter files in the package. Unchanged raw inputs and derived output are checked again at apply.
 
-Native recording interval or OBS container timing can produce candidate events, but interval proximity alone does not assign a meeting. Use explicit match choices when native sources lack verified event identity or a true meeting title. Unknown native idle status blocks source renaming even when transcript import is allowed. Neither a user download nor an import request is idle attestation.
+Native recording interval or OBS container timing can produce candidate events, but interval proximity alone does not assign a meeting. Use explicit match choices when native sources lack verified event identity or a true meeting title. A matched, requested native rename with explicit idle attestation runs the bounded release-observation protocol; eligible results permit actual rename, while busy or unknown results block it. Neither a user download nor an import request is idle attestation. Native completion, proof scope and remaining races are documented in [native-release.md](native-release.md).
 
 ## Normalized artifact contract
 

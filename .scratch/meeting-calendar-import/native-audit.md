@@ -23,7 +23,7 @@ Metadata-only ffprobe inspection of three timestamp-named MOV files found aware 
 
 ## Readiness qualification
 
-Matching completion records corroborate produced transcript snapshots. No producer-owned contract establishing that all recorder/transcriber writers have released a source package was discovered. Native transcript readiness and native rename safety remain separate. Unknown rename safety must block mutation while reporting the reason; neither downloaded files nor operator approval of import fabricates idle metadata.
+Matching completion records corroborate produced transcript snapshots. No universal producer-owned lock/release guarantee was discovered. Native transcript readiness and native rename safety remain separate. A subsequent native-release protocol combines completion evidence, stable inventories, calibrated OS handle observations and independent idle attestation to make supported native renames possible. This is observed quiescence, not a guarantee against invisible or future writers. Unknown or busy results still block mutation; neither downloaded files nor approval of import fabricates release evidence.
 
 ## Adapter verification
 

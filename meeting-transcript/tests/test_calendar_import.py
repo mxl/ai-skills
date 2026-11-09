@@ -144,6 +144,307 @@ class CalendarWorkflowTests(unittest.TestCase):
         event = plan['meetings'][0]['event']['key']
         return self.preview('--match', artifact['id'] + '=' + event, *flags)
 
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_amanu_attested_release_renames_only_package(self):
+        # A literal LF inside lsof's n field is data, not a set boundary.
+        package = self.native_package('native\npackage')
+        original = {p.name: p.read_bytes() for p in package.iterdir()}
+        initial = self.data(self.preview().stdout)
+        artifact = initial['artifacts'][0]
+        event = initial['meetings'][0]['event']['key']
+        before = self.snapshot()
+        report = self.preview('--match', artifact['id'] + '=' + event, '--rename', artifact['id'], '--idle-source', artifact['id'])
+        self.assertEqual(before, self.snapshot())
+        approved = self.data(report.stdout)['artifacts'][0]
+        self.assertTrue(approved['safe'])
+        self.assertEqual(approved['rename_blocked'], '')
+        proof = approved['release_proof']
+        self.assertEqual(proof['status'], 'observed-released')
+        self.assertGreaterEqual(int(proof['duration_ms']), 2000)
+        self.assertEqual(len(proof['scans']), 2)
+        self.assertTrue(all(s['control_seen'] and int(s['other_handles']) == 0 for s in proof['scans']))
+        path, approval = self.save_plan(report)
+        self.apply(path, approval, ok=False)
+        self.assertTrue(package.exists())
+        self.apply(path, approval, '--allow-source-renames')
+        renamed = self.amanu / '2026-08-01 12-00 Planning'
+        self.assertFalse(package.exists())
+        self.assertEqual({p.name: p.read_bytes() for p in renamed.iterdir()}, original)
+        self.assertEqual(self.data((self.settings / 'state.md').read_text())['period_end'], '2026-08-02T00:00:00+00:00')
+
+    def native_rename_flags(self, env=None):
+        initial = self.data(self.preview(env=env).stdout)
+        artifact = initial['artifacts'][0]
+        event = initial['meetings'][0]['event']['key']
+        return ['--match', artifact['id'] + '=' + event, '--rename', artifact['id'], '--idle-source', artifact['id']]
+
+    def hold_source(self, path):
+        process = subprocess.Popen([sys.executable, '-c', 'import sys; f=open(sys.argv[1], "rb"); print("held", flush=True); sys.stdin.readline()', str(path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: process.communicate('\n', timeout=10))
+        self.assertEqual(process.stdout.readline().strip(), 'held')
+        return process
+
+    @unittest.skipUnless(shutil.which('lsof') and shutil.which('ffmpeg') and shutil.which('ffprobe'), 'system lsof/ffmpeg/ffprobe required')
+    def test_native_obs_real_container_release_renames_with_planned_time(self):
+        recording = self.obs / 'raw.mp4'
+        subprocess.run(['ffmpeg', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=16x16:d=1', '-c:v', 'mpeg4', '-metadata', 'creation_time=2026-08-01T09:01:00Z', str(recording)], check=True, capture_output=True, timeout=15)
+        original = recording.read_bytes()
+        flags = self.native_rename_flags()
+        report = self.preview(*flags)
+        artifact = self.data(report.stdout)['artifacts'][0]
+        self.assertTrue(artifact['safe'])
+        self.assertEqual(artifact['release_proof']['scope'], 'exact-file')
+        self.assertIn('operator-attested', artifact['release_proof']['completion_basis'])
+        path, approval = self.save_plan(report)
+        self.apply(path, approval, '--allow-source-renames')
+        self.assertFalse(recording.exists())
+        self.assertEqual((self.obs / '2026-08-01 12-00 Planning.mp4').read_bytes(), original)
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_external_open_handle_is_busy_and_no_attestation_never_probes(self):
+        package = self.native_package()
+        flags = self.native_rename_flags()
+        self.hold_source(package / 'transcript.json')
+        artifact = self.data(self.preview(*flags).stdout)['artifacts'][0]
+        self.assertFalse(artifact['safe'])
+        self.assertEqual(artifact['release_proof']['status'], 'busy')
+        self.assertTrue(artifact['release_proof']['scans'][0]['control_seen'])
+        self.assertGreater(artifact['release_proof']['scans'][0]['other_handles'], 0)
+        no_attestation = flags[:-2]
+        report = self.preview(*no_attestation)
+        self.assertNotIn('release_proof', self.data(report.stdout)['artifacts'][0])
+        path, approval = self.save_plan(report)
+        self.apply(path, approval, '--allow-source-renames')
+        self.assertTrue(package.exists())
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_writer_appears_after_preview_refuses_rename_without_watermark(self):
+        package = self.native_package()
+        path, approval = self.save_plan(self.preview(*self.native_rename_flags()))
+        process = self.start_checkpoint(path, approval, 'before-rename-validation', '--allow-source-renames')
+        self.hold_source(package / 'transcript.json')
+        stdout, stderr = process.communicate('\n', timeout=20)
+        self.assertEqual(process.returncode, 2, stdout + stderr)
+        self.assertIn('native release busy', stderr)
+        self.assertTrue(package.exists())
+        self.assertFalse((self.settings / 'state.md').exists())
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_source_or_parent_replacement_at_boundary_refuses_without_watermark(self):
+        for replace_parent in (False, True):
+            with self.subTest(replace_parent=replace_parent), tempfile.TemporaryDirectory() as unused:
+                fixture = CalendarWorkflowTests()
+                fixture.setUp()
+                try:
+                    package = fixture.native_package()
+                    path, approval = fixture.save_plan(fixture.preview(*fixture.native_rename_flags()))
+                    process = fixture.start_checkpoint(path, approval, 'before-rename-validation', '--allow-source-renames')
+                    if replace_parent:
+                        old = fixture.amanu.with_name('moved-root')
+                        fixture.amanu.rename(old)
+                        fixture.amanu.mkdir()
+                        (old / package.name).rename(package)
+                    else:
+                        moved = package.with_name('moved-package')
+                        package.rename(moved)
+                        shutil.copytree(moved, package)
+                    stdout, stderr = process.communicate('\n', timeout=20)
+                    self.assertEqual(process.returncode, 2, stdout + stderr)
+                    self.assertTrue(package.exists())
+                    self.assertFalse((fixture.settings / 'state.md').exists())
+                finally:
+                    fixture.doCleanups()
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_transcribing_json_marker_is_unresolved_not_release_proof(self):
+        package = self.native_package()
+        (package / '.transcribing.json').write_text('{"status":"stale-or-active-unknown"}')
+        report = self.preview(*self.native_rename_flags())
+        artifact = self.data(report.stdout)['artifacts'][0]
+        self.assertFalse(artifact['safe'])
+        self.assertEqual(artifact['release_proof']['status'], 'unknown')
+        self.assertIn('unknown', artifact['rename_blocked'])
+        path, approval = self.save_plan(report)
+        self.apply(path, approval, '--allow-source-renames')
+        self.assertTrue(package.exists())
+        self.assertFalse(Path(artifact['proposed_path']).exists())
+        self.assertEqual((package / '.transcribing.json').read_text(), '{"status":"stale-or-active-unknown"}')
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_late_destination_collision_never_overwrites(self):
+        package = self.native_package()
+        report = self.preview(*self.native_rename_flags())
+        destination = Path(self.data(report.stdout)['artifacts'][0]['proposed_path'])
+        path, approval = self.save_plan(report)
+        process = self.start_checkpoint(path, approval, 'native-before-relative-rename', '--allow-source-renames')
+        destination.mkdir()
+        (destination / 'keep').write_bytes(b'concurrent unrelated work')
+        stdout, stderr = process.communicate('\n', timeout=20)
+        self.assertEqual(process.returncode, 2, stdout + stderr)
+        self.assertIn('no-clobber', stderr)
+        self.assertTrue(package.exists())
+        self.assertEqual((destination / 'keep').read_bytes(), b'concurrent unrelated work')
+        self.assertFalse((self.settings / 'state.md').exists())
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_pinned_parent_change_and_guarded_postrename_rollback(self):
+        for stage in ('before', 'after', 'after-occupied'):
+            with self.subTest(stage=stage):
+                fixture = CalendarWorkflowTests()
+                fixture.setUp()
+                try:
+                    package = fixture.native_package()
+                    original = {p.name: p.read_bytes() for p in package.iterdir()}
+                    report = fixture.preview(*fixture.native_rename_flags())
+                    destination = Path(fixture.data(report.stdout)['artifacts'][0]['proposed_path'])
+                    path, approval = fixture.save_plan(report)
+                    checkpoint = 'native-before-relative-rename' if stage == 'before' else 'native-after-relative-rename'
+                    process = fixture.start_checkpoint(path, approval, checkpoint, '--allow-source-renames')
+                    moved = fixture.amanu.with_name('moved-root')
+                    fixture.amanu.rename(moved)
+                    fixture.amanu.mkdir()
+                    occupied = moved / package.name
+                    if stage == 'after-occupied':
+                        occupied.mkdir()
+                        (occupied / 'keep').write_bytes(b'concurrent replacement')
+                    stdout, stderr = process.communicate('\n', timeout=20)
+                    self.assertEqual(process.returncode, 2, stdout + stderr)
+                    self.assertFalse((fixture.settings / 'state.md').exists())
+                    self.assertEqual(list(fixture.amanu.iterdir()), [])
+                    if stage == 'after-occupied':
+                        self.assertEqual((occupied / 'keep').read_bytes(), b'concurrent replacement')
+                        restored = moved / destination.name
+                    else:
+                        restored = moved / package.name
+                        self.assertFalse((moved / destination.name).exists())
+                    self.assertEqual({p.name: p.read_bytes() for p in restored.iterdir()}, original)
+                    if stage != 'before':
+                        self.assertIn('manual journal reconciliation', stderr)
+                finally:
+                    fixture.doCleanups()
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_inventory_change_during_observation_never_renames(self):
+        self.native_package()
+        flags = self.native_rename_flags()
+        command = [sys.executable, str(SCRIPT), 'calendar', 'preview', '--project', str(self.project), '--global-config', str(self.global_config), '--calendar', str(self.calendar), '--since', '2026-08-01T00:00:00Z', '--until', '2026-08-02T00:00:00Z', *flags]
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env={**os.environ, 'MEETING_TRANSCRIPT_TEST_CHECKPOINT': 'native-release-between-scans'})
+        self.assertEqual(process.stdout.readline().strip(), 'test: checkpoint native-release-between-scans')
+        (self.amanu / 'native' / 'archive-output').write_bytes(b'new output after producer done')
+        stdout, stderr = process.communicate('\n', timeout=20)
+        self.assertEqual(process.returncode, 0, stderr)
+        artifact = self.data(stdout)['artifacts'][0]
+        self.assertFalse(artifact['safe'])
+        self.assertEqual(artifact['release_proof']['status'], 'unknown')
+        self.assertEqual(len(artifact['release_proof']['scans']), 1)
+        self.assertTrue((self.amanu / 'native').exists())
+        self.assertFalse((self.settings / 'state.md').exists())
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_observation_cannot_rebase_approved_archive_audio(self):
+        package = self.native_package()
+        audio = package / 'audio.wav'
+        audio.write_bytes(b'old synthetic recording')
+        original = audio.stat()
+        path, approval = self.save_plan(self.preview(*self.native_rename_flags()))
+        process = self.start_checkpoint(path, approval, 'native-before-release-observation', '--allow-source-renames')
+        audio.write_bytes(b'new synthetic recording')
+        os.utime(audio, ns=(original.st_atime_ns, original.st_mtime_ns))
+        stdout, stderr = process.communicate('\n', timeout=20)
+        self.assertEqual(process.returncode, 2, stdout + stderr)
+        self.assertIn('changed since preview', stderr)
+        self.assertTrue(package.exists())
+        self.assertFalse((self.settings / 'state.md').exists())
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_post_done_output_changes_mid_observation_even_with_same_size_mtime(self):
+        package = self.native_package()
+        audio = package / 'audio.wav'
+        audio.write_bytes(b'old synthetic recording')
+        original = audio.stat()
+        path, approval = self.save_plan(self.preview(*self.native_rename_flags()))
+        process = self.start_checkpoint(path, approval, 'native-release-between-scans', '--allow-source-renames')
+        audio.write_bytes(b'new synthetic recording')
+        os.utime(audio, ns=(original.st_atime_ns, original.st_mtime_ns))
+        stdout, stderr = process.communicate('\n', timeout=20)
+        self.assertEqual(process.returncode, 2, stdout + stderr)
+        self.assertIn('native release unknown', stderr)
+        self.assertTrue(package.exists())
+        self.assertFalse((self.settings / 'state.md').exists())
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_transcription_restart_at_mutation_boundary_does_not_rename(self):
+        package = self.native_package()
+        path, approval = self.save_plan(self.preview(*self.native_rename_flags()))
+        process = self.start_checkpoint(path, approval, 'native-release-between-scans', '--allow-source-renames')
+        with (package / 'transcribe.log').open('a') as handle:
+            handle.write('2026-08-01T10:02:00Z transcribing restarted-input\n')
+        stdout, stderr = process.communicate('\n', timeout=20)
+        self.assertEqual(process.returncode, 2, stdout + stderr)
+        self.assertIn('native release unknown', stderr)
+        self.assertTrue(package.exists())
+        self.assertFalse((self.settings / 'state.md').exists())
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_lsof_missing_record_boundary_with_real_control_is_unknown(self):
+        package = self.native_package()
+        flags = self.native_rename_flags()
+        binaries = self.root / 'malformed-lsof-bin'
+        binaries.mkdir()
+        executable = binaries / 'lsof'
+        executable.write_text('#!' + sys.executable + '\nimport re, subprocess, sys\nr = subprocess.run(' + repr([shutil.which('lsof')]) + ' + sys.argv[1:], capture_output=True)\nassert re.search(rb"p[0-9]+\\x00\\nf", r.stdout)\nsys.stdout.buffer.write(re.sub(rb"(p[0-9]+\\x00)\\n(?=f)", rb"\\1", r.stdout))\nsys.stderr.buffer.write(r.stderr)\nsys.exit(r.returncode)\n')
+        executable.chmod(0o700)
+        report = self.preview(*flags, env={'PATH': str(binaries)})
+        artifact = self.data(report.stdout)['artifacts'][0]
+        self.assertFalse(artifact['safe'])
+        self.assertEqual(artifact['release_proof']['status'], 'unknown')
+        path, approval = self.save_plan(report)
+        self.apply(path, approval, '--allow-source-renames')
+        self.assertTrue(package.exists())
+        self.assertFalse(Path(artifact['proposed_path']).exists())
+
+    @unittest.skipUnless(shutil.which('lsof'), 'system lsof required')
+    def test_native_lsof_empty_process_sets_and_misplaced_boundaries_are_unknown(self):
+        package = self.native_package()
+        flags = self.native_rename_flags()
+        binaries = self.root / 'bad-boundary-lsof-bin'
+        binaries.mkdir()
+        executable = binaries / 'lsof'
+        transforms = [
+            'r.stdout + b"p999999\\x00\\n"',
+            'r.stdout + b"p999999\\x00\\np888888\\x00\\n"',
+            'r.stdout.replace(b"\\x00\\nf", b"\\x00\\n\\nf")',
+            're.sub(rb"(f[0-9]+\\x00)(?=[Ditn])", rb"\\1\\n", r.stdout)',
+        ]
+        for transform in transforms:
+            with self.subTest(transform=transform):
+                executable.write_text('#!' + sys.executable + '\nimport re, subprocess, sys\nr = subprocess.run(' + repr([shutil.which('lsof')]) + ' + sys.argv[1:], capture_output=True)\nsys.stdout.buffer.write(' + transform + ')\nsys.stderr.buffer.write(r.stderr)\nsys.exit(r.returncode)\n')
+                executable.chmod(0o700)
+                report = self.preview(*flags, env={'PATH': str(binaries)})
+                artifact = self.data(report.stdout)['artifacts'][0]
+                self.assertFalse(artifact['safe'])
+                self.assertEqual(artifact['release_proof']['status'], 'unknown')
+                self.assertTrue(package.exists())
+                self.assertFalse(Path(artifact['proposed_path']).exists())
+
+    def test_native_release_missing_warning_empty_and_malformed_lsof_are_unknown(self):
+        self.native_package()
+        flags = self.native_rename_flags()
+        binaries = self.root / 'lsof-bin'
+        binaries.mkdir()
+        variants = [None, 'import sys; sys.exit(1)', 'print("malformed")', 'import subprocess,sys; r=subprocess.run(' + repr([shutil.which('lsof') or '/missing']) + '+sys.argv[1:], capture_output=True); sys.stdout.buffer.write(r.stdout); sys.stderr.write("warning: synthetic visibility failure\\n"); sys.exit(r.returncode)']
+        for body in variants:
+            with self.subTest(body=body):
+                executable = binaries / 'lsof'
+                executable.unlink(missing_ok=True)
+                if body is not None:
+                    executable.write_text('#!' + sys.executable + '\n' + body + '\n')
+                    executable.chmod(0o700)
+                artifact = self.data(self.preview(*flags, env={'PATH': str(binaries)}).stdout)['artifacts'][0]
+                self.assertFalse(artifact['safe'])
+                self.assertEqual(artifact['release_proof']['status'], 'unknown')
+                self.assertNotIn('warning: synthetic', json.dumps(artifact))
+
     def test_native_json_snapshot_preserves_segments_labels_and_literal_speech(self):
         package = self.native_package(speakers={'speaker_0': {'name': 'Synthetic Alice', 'source': 'manual'}})
         before = self.snapshot()
@@ -263,7 +564,7 @@ class CalendarWorkflowTests(unittest.TestCase):
         self.assertEqual(native['candidates'], [initial['meetings'][0]['event']['key']])
         self.assertEqual(initial['meetings'][0]['status'], 'pending')
         self.assertEqual(initial['meetings'][0]['artifact_ids'], [next(a['id'] for a in initial['artifacts'] if a['type'] == 'obs')])
-        report = self.native_match('--rename', native['id'], '--idle-source', native['id'])
+        report = self.native_match()
         plan = self.data(report.stdout)
         self.assertEqual(len(plan['meetings'][0]['artifact_ids']), 2)
         self.assertFalse(next(a for a in plan['artifacts'] if a['type'] == 'amanu')['safe'])
@@ -414,7 +715,7 @@ class CalendarWorkflowTests(unittest.TestCase):
         self.assertFalse(artifact['safe'])
         self.assertIn('container', ' '.join(artifact['evidence']))
         report = self.preview('--match', artifact['id'] + '=' + event_key, '--rename', artifact['id'], '--idle-source', artifact['id'], env=env)
-        self.assertIn('verified idle', self.data(report.stdout)['artifacts'][0]['rename_blocked'])
+        self.assertIn('native release observation unknown', self.data(report.stdout)['artifacts'][0]['rename_blocked'])
         plan, approval = self.save_plan(report)
         recording.write_bytes(b'changed source bytes')
         self.assertIn('source changed', self.apply(plan, approval, ok=False).stderr)

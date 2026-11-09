@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import meeting_transcript as canonical
 import amanu_native as native
+import native_release
 
 Error = canonical.MeetingError
 NAME_FORMAT = 'YYYY-MM-DD HH-mm title'
@@ -311,7 +312,7 @@ def artifact_snapshot(path, verified=False):
     return result
 
 
-def container_interval(path):
+def container_interval(path, *, verify_structure=False):
     """Read container-level timing only; never decode frames or infer recorder idle.
 
     Disable report files and network/other input protocols. Missing ffprobe,
@@ -320,11 +321,22 @@ def container_interval(path):
     """
     env = {name: value for name, value in os.environ.items() if name != 'FFREPORT'}
     try:
-        result = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration:format_tags=creation_time', '-of', 'json', '-protocol_whitelist', 'file', '-i', str(path)], shell=False, capture_output=True, timeout=10, env=env)
-        if result.returncode:
+        entries = ('format=duration,format_name,nb_streams:format_tags=creation_time:stream=index,codec_type'
+                   if verify_structure else 'format=duration:format_tags=creation_time')
+        result = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', entries, '-of', 'json', '-protocol_whitelist', 'file', '-i', str(path)], shell=False, capture_output=True, timeout=10, env=env)
+        if result.returncode or result.stderr:
             return None
         data = json.loads(result.stdout)
         info = data['format']
+        if verify_structure:
+            streams = data['streams']
+            if (not isinstance(info.get('format_name'), str) or not info['format_name']
+                    or type(info.get('nb_streams')) is not int or info['nb_streams'] <= 0
+                    or not isinstance(streams, list) or len(streams) != info['nb_streams']
+                    or any(not isinstance(stream, dict) or type(stream.get('index')) is not int
+                           or stream.get('codec_type') not in ('video', 'audio', 'subtitle', 'data', 'attachment') for stream in streams)
+                    or not any(stream.get('codec_type') == 'video' for stream in streams)):
+                return None
         raw_duration = info['duration']
         if type(raw_duration) not in (str, int, float):
             return None
@@ -335,6 +347,93 @@ def container_interval(path):
         return start, start + timedelta(seconds=duration)
     except (OSError, subprocess.TimeoutExpired, ValueError, TypeError, KeyError, OverflowError, Error):
         return None
+
+
+def native_release_snapshot(artifact, cutoff):
+    """Bind a complete readable same-device inventory and current native inputs.
+
+    This is a lightweight probe, not another full-video hash. The approved full
+    content hash is independently checked before entering the mutation probe.
+    """
+    path = Path(artifact['path'])
+    if path.resolve() != path:
+        raise Error('native source ancestry changed')
+    root_stat = path.lstat()
+    expected = artifact['snapshot']
+    if any(getattr(root_stat, field) != expected[key] for field, key in
+           [('st_dev', 'device'), ('st_ino', 'inode'), ('st_size', 'size'), ('st_mtime_ns', 'mtime_ns')]):
+        raise Error('native source identity changed')
+    inventory = []
+
+    def inspect(item):
+        current = item.lstat()
+        if current.st_dev != root_stat.st_dev or stat.S_ISLNK(current.st_mode):
+            raise Error('native inventory crosses device or symlink')
+        if not (stat.S_ISDIR(current.st_mode) or stat.S_ISREG(current.st_mode)):
+            raise Error('native inventory requires regular files/directories')
+        flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+        if stat.S_ISDIR(current.st_mode):
+            flags |= os.O_DIRECTORY
+        descriptor = os.open(item, flags)
+        try:
+            held = os.fstat(descriptor)
+            if (held.st_dev, held.st_ino) != (current.st_dev, current.st_ino):
+                raise Error('native inventory changed while opening')
+            inventory.append((str(item.relative_to(path)) if item != path else '', held.st_dev, held.st_ino,
+                              held.st_mode, held.st_size, held.st_mtime_ns, held.st_ctime_ns))
+            if stat.S_ISDIR(held.st_mode):
+                for name in sorted(os.listdir(descriptor)):
+                    inspect(item / name)
+        finally:
+            os.close(descriptor)
+
+    inspect(path)
+    end_limit = min(aware(cutoff), datetime.now(timezone.utc))
+    if artifact.get('format') == 'native_amanu_json':
+        if any((path / name).exists() for name in ('.transcribing', '.transcribing.json', '.recording', 'transcribing', 'recording.lock', '.transcribe.lock')):
+            raise Error('native processing marker requires clarification')
+        values, bindings = native.read_inputs(path)
+        native.render(values, 'Amanu snapshot')
+        start, end = native.interval(values['meta.json'])
+        if bindings != artifact['transcripts'][0]['inputs']:
+            raise Error('native inputs changed')
+        if native.utc_time(values['transcript.json']['created_at']) > end_limit:
+            raise Error('native completion is beyond cutoff')
+        completion_times = [native.utc_time(match[1]) for line in values['transcribe.log'].splitlines() if (match := native.DONE.fullmatch(line))]
+        if not completion_times or max(completion_times) > end_limit:
+            raise Error('native completion is beyond cutoff')
+        terminal = key(bindings)
+    elif artifact.get('format') == 'native_obs_container':
+        metadata = Path(artifact['metadata_path'])
+        if metadata.exists() or metadata.is_symlink():
+            raise Error('native container metadata appeared; regenerate preview')
+        timing = container_interval(path, verify_structure=True)
+        if timing is None:
+            raise Error('native container completion unknown')
+        start, end = timing
+        terminal = key(start.isoformat(), end.isoformat())
+    else:
+        raise Error('unsupported native release source')
+    if end > end_limit or start.isoformat() != artifact['started_at'] or end.isoformat() != artifact['ended_at']:
+        raise Error('native interval changed or has not ended')
+    parent = path.parent.stat()
+    return dict(inventory=inventory, terminal=terminal, parent_identity=[parent.st_dev, parent.st_ino])
+
+
+def observe_native_release(artifact, cutoff):
+    def snapshot():
+        try:
+            return native_release_snapshot(artifact, cutoff)
+        except Error as exc:
+            raise RuntimeError('native evidence unknown') from exc
+    proof = native_release.observe(Path(artifact['path']), package=artifact['type'] == 'amanu', snapshot=snapshot,
+                                   between_scans=lambda: checkpoint('native-release-between-scans'))
+    proof['source_fingerprint'] = key(artifact['snapshot'], artifact['metadata_sha256'],
+                                    [t.get('inputs', []) for t in artifact['transcripts']],
+                                    artifact.get('started_at', ''), artifact.get('ended_at', ''))
+    proof['completion_basis'] = ('ended-metadata-matching-json-log' if artifact['type'] == 'amanu'
+                                 else 'plausible-completed-container-operator-attested-idle')
+    return proof
 
 
 def discover(config, events, state):
@@ -624,12 +723,23 @@ def preview(args):
             blocked = 'meeting unresolved, deferred, declined or unselected'
         elif meeting['status'] == 'calendar-update' and not meeting['accept_update']:
             blocked = 'calendar update requires explicit --accept-update'
-        elif not artifact['safe'] or not artifact['idle_attested']:
-            blocked = 'requires verified idle metadata AND explicit operator --idle-source attestation; timestamps/markers alone are insufficient'
-        elif aware(artifact['ended_at']) > aware(period_end):
-            blocked = 'recording has not ended at captured period end'
+        elif not artifact['idle_attested'] or (not artifact.get('format', '').startswith('native_') and not artifact['safe']):
+            blocked = 'requires verified idle metadata or calibrated native release AND explicit operator --idle-source attestation; timestamps/markers alone are insufficient'
         elif artifact['collision']:
             blocked = 'destination exists; no overwrite or automatic suffix'
+        elif (artifact.get('format', '').startswith('native_') and artifact['rename_requested']
+              and artifact['idle_attested'] and artifact['status'] == 'verified'
+              and aware(artifact['ended_at']) <= aware(period_end)):
+            artifact['release_proof'] = observe_native_release(artifact, period_end)
+            artifact['safe'] = artifact['release_proof']['status'] == 'observed-released'
+            if artifact['safe']:
+                artifact['warning'] = 'eligible under calibrated observed-quiescence and operator attestation; not a producer lock or guarantee against invisible/future handles'
+            if not artifact['safe']:
+                blocked = 'native release observation ' + artifact['release_proof']['status'] + '; regenerate after recorder/transcriber idle and source stable'
+        elif not artifact['safe'] or not artifact['idle_attested']:
+            blocked = 'requires verified idle metadata or calibrated native release AND explicit operator --idle-source attestation; timestamps/markers alone are insufficient'
+        elif aware(artifact['ended_at']) > aware(period_end):
+            blocked = 'recording has not ended at captured period end'
         artifact['rename_blocked'] = blocked
     calendar_known_keys = [m['event']['key'] for m in state['meetings'] if m['status'] != 'declined']
     calendar_snapshot = relevant_calendar(events, period_start, period_end, calendar_known_keys)
@@ -778,6 +888,69 @@ def prepare_snapshot(transcript, title=None):
     if transcript.get('content_sha256') and digest(output) != transcript['content_sha256']:
         raise Error('derived transcript changed; regenerate preview')
     return output
+
+
+def rename_native_at(artifact, cutoff):
+    """Pin rooted parent edges across observation and descriptor-relative rename."""
+    import ctypes
+    source, destination = Path(artifact['path']), Path(artifact['proposed_path'])
+    with directory_anchor(source.parent, label='native source parent') as (parent_fd, verify):
+        before = os.stat(source.name, dir_fd=parent_fd, follow_symlinks=False)
+        expected = (artifact['snapshot']['device'], artifact['snapshot']['inode'])
+        if file_identity(before) != expected:
+            raise Error('native source identity changed')
+        verify()
+        if native_release.fingerprint(native_release_snapshot(artifact, cutoff)) != artifact.get('release_proof', {}).get('inventory_sha256'):
+            raise Error('native source inventory/parent changed since preview')
+        checkpoint('native-before-release-observation')
+        proof = observe_native_release(artifact, cutoff)
+        if proof['status'] != 'observed-released':
+            raise Error('native release ' + proof['status'] + ' immediately before rename; regenerate preview')
+        if proof['inventory_sha256'] != artifact['release_proof']['inventory_sha256']:
+            raise Error('native source inventory/parent changed since preview during release observation')
+        verify()
+        current = native_release_snapshot(artifact, cutoff)
+        if native_release.fingerprint(current) != proof['inventory_sha256']:
+            raise Error('native inventory changed immediately before rename')
+        if file_identity(os.stat(source.name, dir_fd=parent_fd, follow_symlinks=False)) != expected:
+            raise Error('native source identity changed immediately before rename')
+        library = ctypes.CDLL(None, use_errno=True)
+        if sys.platform == 'darwin' and hasattr(library, 'renameatx_np'):
+            function, flags = library.renameatx_np, 4
+        elif sys.platform.startswith('linux') and hasattr(library, 'renameat2'):
+            function, flags = library.renameat2, 1
+        else:
+            raise Error('descriptor-relative no-clobber rename unsupported')
+        function.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        checkpoint('native-before-relative-rename')
+        verify()
+        if native_release.fingerprint(native_release_snapshot(artifact, cutoff)) != proof['inventory_sha256']:
+            raise Error('native source inventory changed immediately before atomic rename')
+        if file_identity(os.stat(source.name, dir_fd=parent_fd, follow_symlinks=False)) != expected:
+            raise Error('native source identity changed immediately before atomic rename')
+        verify()
+        if function(parent_fd, os.fsencode(source.name), parent_fd, os.fsencode(destination.name), flags):
+            raise Error('native no-clobber rename failed; no overwrite')
+        checkpoint('native-after-relative-rename')
+        try:
+            verify()
+            if file_identity(os.stat(destination.name, dir_fd=parent_fd, follow_symlinks=False)) != expected:
+                raise Error('cannot verify native rename destination identity')
+            try:
+                os.stat(source.name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise Error('native source still exists after rename')
+        except (Error, OSError):
+            # Only reverse our exact artifact and never replace an existing name.
+            try:
+                if file_identity(os.stat(destination.name, dir_fd=parent_fd, follow_symlinks=False)) == expected:
+                    function(parent_fd, os.fsencode(destination.name), parent_fd, os.fsencode(source.name), flags)
+            except OSError:
+                pass
+            raise Error('native parent/result changed; manual journal reconciliation required')
+        artifact['release_proof'] = proof
 
 
 def rename_exclusive(source, destination):
@@ -1028,13 +1201,25 @@ def apply(args):
                 if source.resolve() != source or source.parent != destination.parent or artifact_snapshot(source, True) != artifact['snapshot']:
                     raise Error('source changed immediately before rename; regenerate preview')
                 # Keep the small processing/identity check LAST, after potentially long media hashes.
-                current_metadata = Path(artifact['metadata_path']).read_bytes()
-                if digest(current_metadata) != artifact['metadata_sha256']:
-                    raise Error('metadata changed immediately before rename; regenerate preview')
-                metadata = tomllib.loads(current_metadata.decode('utf-8'))
-                if metadata.get('processing') != 'idle' or not artifact['idle_attested'] or not artifact['safe']:
+                if not artifact['idle_attested'] or not artifact['safe']:
                     raise Error('source is not verifiably idle immediately before rename')
-                rename_exclusive(source, destination)
+                if artifact.get('format', '').startswith('native_'):
+                    # Readers from imports/full hashes are closed before probing.
+                    rename_native_at(artifact, plan['period_end'])
+                else:
+                    current_metadata = Path(artifact['metadata_path']).read_bytes()
+                    if digest(current_metadata) != artifact['metadata_sha256']:
+                        raise Error('metadata changed immediately before rename; regenerate preview')
+                    metadata = tomllib.loads(current_metadata.decode('utf-8'))
+                    if metadata.get('processing') != 'idle':
+                        raise Error('source is not verifiably idle immediately before rename')
+                if source.resolve() != source or source.parent != destination.parent:
+                    raise Error('source identity changed immediately before rename')
+                if not artifact.get('format', '').startswith('native_'):
+                    renamed_identity = source.stat()
+                    rename_exclusive(source, destination)
+                    if source.exists() or file_identity(destination.lstat()) != file_identity(renamed_identity):
+                        raise Error('cannot verify rename result; manual reconciliation required')
                 failpoint('after-rename')
                 relocate_artifact(artifact, destination)
             records[event_key] = record

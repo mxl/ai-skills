@@ -34,7 +34,7 @@ Sample metadata also contains `ended`, stop reasons such as `call-ended` or `sys
 
 The audit found no `.transcribing.json` markers; absence does not prove idle. Presence alone would not prove active processing either. Native transcript snapshot eligibility and source rename eligibility must remain separate decisions. A supported snapshot can be imported after approval and unchanged-input checks while the original package remains untouched.
 
-No universal producer-owned idle/release contract was established. Keep native source renames blocked without positive verified idle evidence and explicit operator attestation. Do not write normalized `processing = idle` metadata into real packages to bypass this protection.
+No universal producer-owned idle/release contract was established. Native sources can nevertheless become eligible under the explicit [observed-release verification protocol](native-release.md): completion evidence, stable inventory, calibrated OS handle checks, and independent operator attestation. Completion evidence alone never enables rename. Busy, changed or unobservable sources remain blocked. Do not write normalized `processing = idle` metadata into real packages to bypass verification.
 
 ## Native OBS timing evidence
 

@@ -1,5 +1,8 @@
 [
   {"query": "$meeting import the latest Granola exports", "should_trigger": true},
+  {"query": "Импортируй встречи проекта из настроенных OBS и Amanu начиная с последней синхронизации.", "should_trigger": true},
+  {"query": "Найди записи встреч по календарю проекта и покажи план переименований без изменений файлов.", "should_trigger": true},
+  {"query": "Повтори импорт встреч и проверь старые встречи без готового транскрипта.", "should_trigger": true},
   {"query": "$meeting summarize meeting with Alex on May 21st", "should_trigger": true},
   {"query": "$meeting summarize meetings/2026-08-01-platform-sync", "should_trigger": true},
   {"query": "Import screenpipe-output.meeting-transcript.md into the Atlas meeting folder.", "should_trigger": true},

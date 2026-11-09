@@ -185,12 +185,17 @@ def atomic_write(path: Path, content: bytes) -> None:
         raise
 
 
-def import_command(args) -> int:
-    source_path = Path(args.source).expanduser().resolve()
+def prepare_import(source_path: Path) -> tuple[dict, bytes]:
+    """Shared canonical validation and byte normalization, without destination writes."""
     content = read_text(source_path)
     meeting = parse_transcript(content)
+    return meeting, (content.rstrip() + "\n").encode("utf-8")
+
+
+def import_command(args) -> int:
+    source_path = Path(args.source).expanduser().resolve()
+    meeting, output = prepare_import(source_path)
     destination = Path(args.out).expanduser().resolve() / "transcript.md"
-    output = (content.rstrip() + "\n").encode("utf-8")
     existed = destination.exists()
     changed = not existed or read_bytes(destination) != output
     if changed:
@@ -252,6 +257,15 @@ def summarize_prepare_command(args) -> int:
     return 0
 
 
+def calendar_command(args) -> int:
+    # Keep the original import/summary seam independent of calendar dependencies.
+    from calendar_import import Error, run
+    try:
+        return run(args)
+    except Error as exc:
+        raise MeetingError(str(exc)) from exc
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -267,6 +281,33 @@ def build_parser() -> argparse.ArgumentParser:
     prepare.add_argument("transcript")
     prepare.add_argument("--bundle")
     prepare.set_defaults(func=summarize_prepare_command)
+    calendar = subparsers.add_parser("calendar", help="preview/apply calendar-linked imports (Python 3.11+)")
+    operations = calendar.add_subparsers(dest="operation", required=True)
+    preview = operations.add_parser("preview", help="print a read-only Markdown plan")
+    preview.add_argument("--project", required=True)
+    preview.add_argument("--global-config")
+    preview.add_argument("--calendar", required=True, help="normalized external calendar JSON")
+    preview.add_argument("--provider")
+    preview.add_argument("--calendar-id", action="append")
+    preview.add_argument("--timezone")
+    preview.add_argument("--destination")
+    preview.add_argument("--source", action="append", help="TYPE=absolute-path; replaces configured discovery")
+    preview.add_argument("--since")
+    preview.add_argument("--until")
+    preview.add_argument("--match", action="append", default=[], help="artifact-id=event-key")
+    preview.add_argument("--transcript", action="append", default=[], help="event-key=transcript-id")
+    preview.add_argument("--decline", action="append", default=[], help="event-key")
+    preview.add_argument("--select", action="append", help="event-key; default all visible meetings")
+    preview.add_argument("--rename", action="append", default=[], help="artifact-id")
+    preview.add_argument("--idle-source", action="append", default=[], help="artifact-id: explicit operator idle attestation")
+    preview.add_argument("--accept-update", action="append", default=[], help="event-key")
+    preview.set_defaults(func=calendar_command)
+    apply = operations.add_parser("apply", help="apply an exact approved Markdown preview")
+    apply.add_argument("--plan", required=True)
+    apply.add_argument("--approve", required=True, help="SHA-256 of exact preview bytes")
+    apply.add_argument("--calendar", required=True, help="fresh normalized calendar snapshot")
+    apply.add_argument("--allow-source-renames", action="store_true")
+    apply.set_defaults(func=calendar_command)
     return parser
 
 

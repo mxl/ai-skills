@@ -1,45 +1,43 @@
 # Native recording formats and evidence
 
+Authority: native formats, conversion and transcript readiness. For source renames, also read [native-release.md](native-release.md); readiness is not release.
+
 ## Verified local Amanu corpus
 
-After the user explicitly downloaded the source corpus, read-only structural inspection covered 32 top-level Amanu packages and 5,879 transcript segments. No speech, participant names, or meeting titles were copied into fixtures or audit output. The earlier `compressed,dataless` / `Resource deadlock avoided` blocker no longer applies to those downloaded samples.
+Read-only inspection after the user's explicit download covered **32 top-level packages / 5,879 segments**, without copying speech, participant names or meeting titles into fixtures/audit output. The earlier `compressed,dataless` / `Resource deadlock avoided` blocker no longer applies to those samples.
 
-Observed files:
+| Input | Structure |
+| --- | --- |
+| `meta.json` | Object: aware UTC `started` / `ended`, numeric non-boolean `duration_seconds`. Capture fields (`app`, `mic_capture`, `recovered`, stop-hook information) vary and are optional. |
+| `transcript.json` | Object: `created_at`, `engine`, `model`, nonempty ordered `segments`. Each segment has integer `start_ms` / `end_ms`, string `speaker` / `text`. |
+| `speakers.json` (optional) | Object: `created_at`, `speakers` map with string values or objects containing `name` / `source`. |
+| `transcript.md` | Timestamped utterances (`**[minutes:seconds] Speaker:** text`), not canonical meeting Markdown. |
 
-- `meta.json`: object with timezone-aware UTC `started` and `ended`, numeric non-boolean `duration_seconds`, plus optional technical fields such as `app`, `mic_capture`, `recovered`, and stop-hook information. Optional capture fields vary and must not become unconditional requirements.
-- `transcript.json`: object with `created_at`, `engine`, `model`, and nonempty ordered `segments`.
-- Each segment: integer `start_ms` and `end_ms`, string `speaker`, string `text`.
-- `speakers.json`: object with `created_at` and a `speakers` map. The observed map contains both string values and objects with `name` / `source`.
-- `transcript.md`: timestamped utterances such as `**[minutes:seconds] Speaker:** text`; this is not the canonical meeting-transcript template.
+All samples had valid aware timestamps, numeric durations within one second of the recording interval, valid segment types and start ordering. **Ten packages overshot metadata duration at the final segment end**; this alone does not invalidate speech or authorize truncation/reordering.
 
-All audited packages had valid aware recording timestamps and numeric durations consistent with the interval to within one second. Segment start ordering and field types were valid throughout. Ten packages had a final segment end beyond the metadata recording duration: do not truncate source text, reorder segments, or declare invalid solely from that observed chunk-timing overshoot.
-
-Observed segment speaker strings did not match speaker-map keys or string values. They are labels in their own right, not grounds for guessing a person. Preserve the segment label unless an explicit exact mapping is supported by the adapter; never fuzzy-match speaker identities or treat an absent mapping as proof that speech is invalid. Use labels actually present in turns rather than assuming every map entry attended.
+Observed segment speaker labels matched neither map keys nor string values. Preserve unresolved labels; resolve identities only through adapter-supported exact mappings, never fuzzy matches. Derive participants from labels actually used in turns, not every map entry. An absent mapping does not invalidate speech.
 
 ## Transcript conversion
 
-Prefer structured native JSON over parsing displayed minute/second timestamps from Markdown. Convert only a validated, internally consistent snapshot into canonical meeting Markdown, in memory. Preserve source text, speaker labels, order, and source recording times. Joining consecutive chunks from the same speaker with newlines follows the existing canonical convention.
-
-Use the explicitly matched calendar title when no actual source meeting title is available. An application name or helper-process name is not the meeting title. Unsupported/unrepresentable labels, malformed JSON, missing recording end, or incomplete transcript data must remain pending with an explanation, not be silently repaired.
-
-The existing canonical template carries recording-level Started/Ended metadata, not per-segment timestamp annotations. Segment millisecond bounds remain intact in the original JSON and are protected by its raw-input hash; do not insert timestamps or synthetic IDs into speech or change the fixed template to invent a new timed transcript format.
-
-Preview must bind the source inputs and actual event-title-specific converted output to hashes. Revalidate at apply; source edits invalidate approval. Do not persist an extra adapter JSON or overwrite the original native Markdown/JSON.
+1. Convert validated, internally consistent structured JSON to canonical Markdown **in memory**, preserving text, labels, order and recording times. Join consecutive same-speaker chunks with newlines per canonical convention.
+2. Without a true source meeting title, use the explicitly matched calendar title—not an app/helper-process name. Unsupported/unrepresentable labels, malformed JSON, missing recording end or incomplete data remain pending with an explanation; do not repair silently.
+3. Keep the fixed template's recording-level Started/Ended metadata. Preserve segment millisecond bounds in the original JSON under its raw-input hash; do not add timestamps/synthetic IDs to speech or invent a timed template.
+4. Bind preview to **raw-input hashes and the actual event-title-specific derived-output hash**; revalidate both at apply. Source edits invalidate approval. Leave original native Markdown/JSON unchanged and persist no adapter JSON.
 
 ## Readiness is not rename safety
 
-All 32 audited logs contain one completion record with the grammar `<UTC ISO timestamp> done — <integer> segments`; it is not the last line, because archive/cleanup records follow. All 32 counts match their JSON segment counts, and transcript `created_at` values are close to the log's second-precision completion time. Validate that completion evidence belongs to the current transcript snapshot rather than accepting an arbitrary old `done` line. Missing, stale, or mismatched completion evidence keeps the native transcript pending.
+All 32 logs had one completion record, `<UTC ISO timestamp> done — <integer> segments`, followed by archive/cleanup records: **completion need not be the last line**. Counts matched JSON segments; transcript `created_at` was close to second-precision completion time.
 
-Sample metadata also contains `ended`, stop reasons such as `call-ended` or `system-sleep`, and `on_stop_hook = fired`. These corroborate production of transcription output, not release of every recorder/transcriber file handle.
+Validate completion against the current snapshot: matching segment count, completion no earlier than `created_at` at whole-second precision, and no later transcription restart. Missing, stale or mismatched evidence remains pending; an arbitrary old `done` line is insufficient.
 
-The audit found no `.transcribing.json` markers; absence does not prove idle. Presence alone would not prove active processing either. Native transcript snapshot eligibility and source rename eligibility must remain separate decisions. A supported snapshot can be imported after approval and unchanged-input checks while the original package remains untouched.
+Metadata `ended`, stop reasons (`call-ended`, `system-sleep`) and `on_stop_hook = fired` corroborate transcript production, not released handles. No audited package had `.transcribing.json`. The marker alone proves neither active processing nor idle state.
 
-No universal producer-owned idle/release contract was established. Native sources can nevertheless become eligible under the explicit [observed-release verification protocol](native-release.md): completion evidence, stable inventory, calibrated OS handle checks, and independent operator attestation. Completion evidence alone never enables rename. Busy, changed or unobservable sources remain blocked. Do not write normalized `processing = idle` metadata into real packages to bypass verification.
+An approved, unchanged supported snapshot can be imported while its package stays untouched. No universal producer-owned idle/release contract was established: requested renames require the separate [release protocol](native-release.md), never completion alone or fabricated normalized `processing = idle` metadata.
 
 ## Native OBS timing evidence
 
-Read-only `ffprobe` checks of three timestamp-named MOV files found timezone-aware UTC container `creation_time` and finite format duration. In those samples, creation time matches the filename clock with a three-hour difference and is consistent with recording start rather than end. That sample observation is not a universal timezone or start-time guarantee.
+Read-only `ffprobe` checks of three timestamp-named MOVs found aware UTC container `creation_time` and finite duration. Creation time plausibly represented recording start and differed from the filename clock by three hours; neither interpretation is universal.
 
-Use container timestamps only as labeled evidence for candidate selection. Require an explicit match when interval overlap is the only evidence; never hard-code the observed three-hour difference, substitute filesystem modification time, or infer that OBS has stopped writing. Missing or invalid probe data remains unknown. Probe only metadata, without decoding frames or audio or writing reports.
+Use container timing only as labeled candidate evidence. Require an explicit match when interval overlap is the only evidence. Never hard-code that offset, substitute filesystem mtime or infer OBS stopped writing. Missing/invalid probe data stays unknown. Release additionally requires known readable container structure and positive finite duration, per [native-release.md](native-release.md#evidence-bundle).
 
-The official ffprobe documentation defines the `-show_entries`, `format_tags`, and JSON writer interfaces: https://ffmpeg.org/ffprobe.html . Context7 documentation lookup was performed before implementing this integration.
+Probe metadata only: no frame/audio decoding or report writes. Interface reference: [official ffprobe documentation](https://ffmpeg.org/ffprobe.html) (`-show_entries`, `format_tags`, JSON writer).

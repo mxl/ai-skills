@@ -1,57 +1,56 @@
 # Granola acquisition and unified import
 
-Read this for a generic meeting import, an explicitly requested Granola refresh, or a Granola acquisition failure. Importing an explicitly selected local transcript does not require a refresh.
+Read for the generic three-source handoff, a Granola refresh within synchronization, or an acquisition failure. An explicitly selected local transcript needs no refresh; standalone `$granola fetch` follows its own range workflow without calendar-import setup.
 
-## Acquisition authority and setup
+## 1. Resolve scope and export root
 
-A generic “импортируй встречи” request selects the three-source workflow: new Granola acquisition plus OBS/Amanu discovery. Load the `granola` skill before acquisition and use its existing fetch script, not a new API client. Explain that the fetch may temporarily patch/restart Granola and retain its patch, bulk-fetch and version-drift confirmation gates. Use `--yes` only after the user has approved the whole operation; selecting the three-source default is not a blanket permission to suppress future app-modification confirmations. A development request does not authorize a real fetch.
+Load `granola` and use its existing fetcher, not a replacement API client. It owns app-modification disclosures, patch/bulk confirmations, drift re-verification and cleanup. `--yes` requires approval of the whole operation; the configured default does not waive future confirmations. Development/tests use mocked acquisition, not the live app.
 
-For the calendar-linked handoff, resolve the project's actual calendar binding, timezone, import destination, first start or saved boundary, and fixed period end before fetching. A standalone `$granola fetch` keeps its own date-range workflow and does not require calendar-import project configuration. Include unresolved older events in the acquisition scope; fetching only from the latest successful boundary can otherwise strand a pending Granola transcript forever. Explicit declines remain suppressed.
+For synchronization, first resolve the project's calendar, timezone, destination and explicit initial start or saved successful boundary. Include unresolved older event intervals and suppress declines. Capture one aware end and reuse it as every preview's `--until`.
 
-Resolve one export root in this order:
+Export-root precedence:
 
-1. A user-selected export path.
-2. An explicitly configured selected Granola source path.
-3. `GRANOLA_EXPORT_DIR` when set.
-4. `<project>/.granola/`, the Granola skill's documented default.
+1. Explicit user path.
+2. Selected configured Granola source path.
+3. `GRANOLA_EXPORT_DIR`.
+4. `<project>/.granola/`.
 
-Pass the same absolute path to fetch `--out` and preview `--granola-dir`. This additive preview option preserves the configured OBS/Amanu roots, including older project configurations that list only those two. A catalog source with `type = "granola"` is also supported. Conflicting roots require clarification instead of scanning arbitrary extra directories. Do not silently write project configuration or invent calendar identifiers.
+Resolve it to an absolute path and use it for both fetch `--out` and preview `--granola-dir`. The additive preview flag preserves OBS/Amanu roots, including older two-source project configurations; a selected catalog source with `type = "granola"` also works. Clarify conflicting roots rather than choosing extra directories, writing configuration or inventing calendar IDs.
 
-## Date-range handoff
+## 2. Fetch a covering date range
 
-Capture one timezone-aware synchronization end and reuse it with every preview's `--until`; use the saved successful start or the explicitly selected initial start. Include earlier pending event intervals too.
+Granola filters the unconverted date prefix of document `created_at`, not meeting timestamps. For timezone-boundary coverage:
 
-Granola's `--from`/`--to` interface uses date strings and filters the date prefix of document `created_at`; it does not convert those timestamps into the project's timezone. Request a covering date range rather than pretending it is an exact timestamp filter: convert the earliest needed instant and fixed end to UTC, use the earliest UTC date minus one day as FROM, and the end's UTC date plus two days as exclusive TO. This includes adjacent timezone dates, not arbitrary differences between document creation and meeting time. `created_at` may be far from the meeting's start: a successful date-prefix fetch proves completion of that document query, not exhaustive meeting-time coverage. If an expected meeting is absent, inspect the reported scope and ask for an approved wider acquisition range rather than treating the meeting as nonexistent. Filter the resulting local exports against actual calendar-event evidence and exact synchronization scope during unified preview. Extra fetched documents are not automatic imports. Do not add an API title filter that could hide meetings from one project calendar.
+- Convert the earliest needed instant—including older pending work—and fixed end to UTC.
+- Set FROM to the earliest UTC date minus one day.
+- Set exclusive TO to the end's UTC date plus two days.
 
-Run from the active project:
+Padding covers adjacent timezone dates only: document creation can be far from meeting start. A complete document query is not proof of exhaustive meeting-time coverage. If an expected meeting is absent, inspect scope and ask for an approved wider fetch. Use actual calendar evidence and exact synchronization scope afterward; extra exports are not automatic imports. Avoid API title filters that could hide project meetings.
+
+Run from the active project with resolved dates:
 
 ```sh
 python3 <granola-skill-dir>/scripts/granola_fetch.py \
   --from FROM_DATE --to EXCLUSIVE_TO_DATE \
-  --out /absolute/export-root \
-  --strict-completion
+  --out /absolute/export-root --strict-completion
 ```
 
-The placeholders are resolved dates, not literal arguments. The fetch script creates its export directory, writes canonical Markdown only, and restores app changes through its existing cleanup flow. Do not call this script during skill tests; mock the acquisition boundary.
+The fetcher creates the export root and writes canonical Markdown. Keep `--strict-completion`: legacy success may conceal individual request failures. Empty/missing transcript content means not ready, not a failed API request; leave corresponding work pending.
 
-## Complete versus incomplete acquisition
+## 3. Gate on acquisition status
 
-Use `--strict-completion`: legacy exit status alone is insufficient, because individual transcript request failures previously still returned success. Strict mode refuses to attest completeness when listing reaches its current unpaginated limit or a document/transcript request fails. Empty/missing transcript content is different from an API failure: report it as not ready and leave corresponding calendar work pending.
+| Result | Next action |
+|---|---|
+| Strict acquisition and cleanup complete | Preview with the same export root and fixed cutoff. |
+| Missing app, authentication/API error, cancelled confirmation, drift, saturated listing or failed restoration | Stop with the reason, or produce a diagnostic preview with `--source-acquisition-incomplete granola`. |
+| Valid empty query / missing transcript | Report it distinctly; review calendar work still lacking a ready transcript. |
 
-A missing app, authentication failure, cancelled confirmation, version drift, API error, saturated listing or failed restoration is incomplete acquisition, not an empty source. Do not patch around a drift error, fall back silently to stale exports, or claim all three sources were checked successfully.
+An incomplete plan cannot apply or advance the boundary. Re-fetch successfully and regenerate the full preview before approval. Stale local exports, force flags or a separately approved direct-file import cannot turn failed three-source acquisition into a complete synchronization.
 
-On an incomplete fetch, either stop with an actionable explanation or show a read-only preview marked `--source-acquisition-incomplete granola`. Such a plan is diagnostic only: apply must refuse it and preserve the synchronization boundary. Re-fetch successfully and regenerate the full preview before requesting apply approval. Independently approved explicit local-file imports remain a separate workflow, not a way to label this synchronization complete.
+## 4. Hand off to unified review
 
-## Unified review
+Return to [calendar-sync.md](calendar-sync.md#3-discover-and-review) and use [calendar-cli.md](calendar-cli.md) for preview/apply. Validate canonical metadata/times/content and preserve frontmatter, heuristic speaker provenance and original Granola filenames/content. Document IDs and filenames are not calendar IDs.
 
-After successful acquisition, use the existing calendar preview command with `--granola-dir /absolute/export-root` and the same fixed `--until`. The source is canonical Markdown: validate template metadata, source times and transcript content. Preserve its existing frontmatter and supported speaker-label provenance. Filenames and document IDs are not calendar event IDs.
+The shared workflow owns event matching, competing-transcript choices, single-import/all-source associations, pending retries and exact-plan approval. Input/output hashes and the discovery inventory are rechecked at apply; new exports require a fresh preview. Granola renames remain blocked even with idle attestation; only OBS/Amanu use the recording-rename protocol.
 
-Group confirmed Granola, OBS and Amanu artifacts by the actual calendar event. Time proximity alone requires an explicit match; do not assign the nearest event. Deduplicate byte-identical canonical candidates. Ask which transcript to use when Granola and Amanu produce different ready candidates; do not silently rank, concatenate or merge them.
-
-One event produces one canonical destination regardless of how many sources exist. Persist all source associations and retry pending work without duplicating already imported meetings. Source reads and final output are approval/hash-bound and revalidated at apply.
-
-Granola exports are immutable workflow inputs: keep their original names and contents. Source renaming applies only to OBS videos and Amanu packages under their existing safety protocol. A Granola rename request is blocked, even when an idle attestation is present.
-
-## Completion
-
-Report Granola acquisition status, range and export root, OBS/Amanu discovery status, source choices, imported/unchanged/pending/declined meetings and the successful period boundary. Clearly distinguish a valid empty result from an inaccessible or incomplete source. Offer summarization separately; neither fetching nor import starts summarization automatically.
+Report acquisition status, range/root and any incomplete or not-ready work with the shared import results. Offer summarization separately.

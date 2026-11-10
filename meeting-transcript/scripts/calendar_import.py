@@ -1281,6 +1281,82 @@ def exclusive_import(source, out, output, settings, *, prepare=None):
     print(f'phase: import\nstatus: {status}\ntranscript_md: {destination}\nchanged: {"yes" if status == "created" else "no"}\nnext_phase: summarize')
 
 
+def ensure_project_ignores(project):
+    """Append only missing privacy rules, serialized on the regular .gitignore.
+
+    Existing bytes are never rewritten. Negations conservatively invalidate all
+    earlier matches, so our canonical rules follow any possible reinclusion.
+    Failure aborts the caller before journal, state, import or rename mutations;
+    an interrupted append may leave a prefix of the new rules, repaired on retry.
+    """
+    project = Path(project).expanduser().resolve()
+    if not project.is_dir():
+        raise Error('project must exist')
+    rules = (b'/.granola/', b'/.meeting-transcript/meeting-transcript.lock')
+    equivalents = {
+        b'.granola': rules[0], b'.granola/': rules[0],
+        b'/.granola': rules[0], rules[0]: rules[0],
+        b'.meeting-transcript/meeting-transcript.lock': rules[1], rules[1]: rules[1],
+    }
+    with directory_anchor(project, label='project ignore setup') as (parent_fd, verify):
+        try:
+            current = os.stat('.gitignore', dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            if not stat.S_ISREG(current.st_mode):
+                raise Error('.gitignore must be a regular file, never a symlink/device/FIFO')
+        descriptor = os.open('.gitignore', os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK, 0o666, dir_fd=parent_fd)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise Error('.gitignore must be a regular file, never a symlink/device/FIFO')
+            handle = os.fdopen(descriptor, 'a+b')
+            descriptor = None
+            with handle:
+                fcntl.flock(handle, fcntl.LOCK_EX)
+
+                def verify_file():
+                    verify()
+                    current = os.stat('.gitignore', dir_fd=parent_fd, follow_symlinks=False)
+                    if not stat.S_ISREG(current.st_mode) or file_identity(current) != file_identity(os.fstat(handle.fileno())):
+                        raise Error('.gitignore changed during setup; retry')
+
+                verify_file()
+                handle.seek(0)
+                content = handle.read()
+                covered = set()
+                for line in content.split(b'\n'):
+                    line = line.removesuffix(b'\r').rstrip(b' ')
+                    if line.startswith(b'!'):
+                        covered.clear()
+                    elif line in equivalents:
+                        covered.add(equivalents[line])
+                missing = [rule for rule in rules if rule not in covered]
+                if not missing:
+                    return False
+                first_newline = content.find(b'\n')
+                newline = b'\r\n' if first_newline > 0 and content[first_newline - 1:first_newline] == b'\r' else b'\n'
+                terminated = not content or content.endswith(b'\n')
+                suffix = (b'' if terminated else newline) + newline.join(missing)
+                if terminated:
+                    suffix += newline
+                verify_file()
+                handle.write(suffix)
+                handle.flush()
+                os.fsync(handle.fileno())
+                verify_file()
+                return True
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+
+def setup(args):
+    changed = ensure_project_ignores(args.project)
+    print(f'phase: setup\nstatus: {"updated" if changed else "unchanged"}\ngitignore: {Path(args.project).expanduser().resolve() / ".gitignore"}')
+    return 0
+
+
 def apply(args):
     plan_bytes = Path(args.plan).read_bytes()
     if digest(plan_bytes) != args.approve:
@@ -1297,7 +1373,7 @@ def apply(args):
     if settings.is_symlink() or settings.resolve() != settings:
         raise Error('settings must not be a symlink')
     settings.mkdir(parents=True, exist_ok=True)
-    with project_lock_file(settings / 'workflow.lock') as lock:
+    with project_lock_file(settings / 'meeting-transcript.lock') as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
@@ -1324,6 +1400,7 @@ def apply(args):
         if state['generation'] != plan['state_generation']:
             if journal and state['generation'] == plan['state_generation'] + 1 and state['period_end'] == plan['period_end']:
                 validate_plan(plan, args.calendar)
+                ensure_project_ignores(project)
                 journal_path.unlink()
                 print('status: already completed; recovered final checkpoint')
                 return 0
@@ -1331,6 +1408,7 @@ def apply(args):
         validate_plan(plan, args.calendar)
         if any(a['rename_requested'] and not a['rename_blocked'] and a['proposed_path'] != a['path'] for a in plan['artifacts']) and not args.allow_source_renames:
             raise Error('approved plan includes source renames; additionally pass --allow-source-renames')
+        ensure_project_ignores(project)
         if journal is None:
             journal = dict(version=1, kind='meeting-calendar-journal', plan_sha256=args.approve, plan=copy.deepcopy(plan), allowed_state_hashes=[state_hash(read_state(project)), state_hash(state)], operations=[])
             save_journal(journal_path, journal)
@@ -1421,6 +1499,12 @@ def apply(args):
 
 def run(args):
     try:
-        return preview(args) if args.operation == 'preview' else apply(args)
+        if args.operation == 'setup':
+            return setup(args)
+        if args.operation == 'preview':
+            return preview(args)
+        if args.operation == 'apply':
+            return apply(args)
+        raise Error(f'unknown calendar operation: {args.operation}')
     except (OSError, ValueError, TypeError, KeyError) as exc:
         raise Error(str(exc)) from exc

@@ -46,6 +46,8 @@ Read prior `.meeting-transcript/state.md`: use the successful boundary for the n
 
 ## 2. Acquire complete inputs
 
+For the project's first import setup, automatically run `calendar setup --project <resolved-project>` as documented in [calendar-cli.md](calendar-cli.md#project-setup) before fetching Granola. This ensures `.granola/` and `.meeting-transcript/meeting-transcript.lock` are ignored by Git without changing configuration or tracking state/plans. Re-running setup is safe; read-only preview requests remain non-mutating.
+
 Use the provider's authenticated integration for read-only retrieval; load `gog` for Google or the applicable provider skill. Retrieve every page, the new period, unresolved events and known non-declined identities needed for change detection. Preserve provider/calendar/event/recurrence-instance identity; titles are not IDs. Normalize supplied facts only. Missing lookups and inaccessible calendars are incomplete reads, not empty calendars.
 
 For generic import, read [granola-import.md](granola-import.md) and fetch through the `granola` skill before preview. That reference owns date/root resolution and the incomplete-acquisition gate. Append its root with `--granola-dir` or use its selected catalog entry: an older OBS/Amanu-only project source list does not silently disable Granola. Retain acquisition/app-modification confirmations. A development request authorizes neither fetching nor real imports/renames.

@@ -2,6 +2,19 @@
 
 Read [calendar-sync.md](calendar-sync.md) first for authority, setup and synchronization scope. Commands require Python 3.11+ on macOS/Linux; apply is unsupported on Windows. Tests ran on macOS: validate Linux exclusive-rename behavior on the target host.
 
+## Project setup
+
+After resolving the project for its first import, run this idempotent setup before acquisition:
+
+```sh
+python3 <skill-dir>/scripts/meeting_transcript.py calendar setup \
+  --project /absolute/project
+```
+
+Setup automatically adds `/.granola/` and `/.meeting-transcript/meeting-transcript.lock` to the project's `.gitignore`, preserving existing bytes and skipping already-effective rules. It needs neither calendar credentials nor configuration and creates no exports, transcripts, state or lock file. Unsafe `.gitignore` symlinks/nonregular files are refused. It does not untrack files already in Git or ignore the entire `.meeting-transcript/` directory: state and reviewed plans remain versionable. A custom in-project Granola export path needs its own separately scoped ignore rule.
+
+An import request includes this setup step; an explicitly read-only preview or a development task does not authorize modifying the user's `.gitignore`. `preview` itself remains read-only. Approved `apply` also ensures these rules before journal/import writes as a fallback for direct CLI callers.
+
 ## Preview
 
 ```sh
@@ -128,7 +141,9 @@ The optional `transcript` is Amanu-only, package-relative and an existing canoni
 |---|---|
 | `.meeting-transcript/state.md` | Successful boundary and per-meeting progress. |
 | `.meeting-transcript/journal.md` | Durable incomplete-transaction intents; removed after success. |
-| `.meeting-transcript/workflow.lock` | Kernel-backed writer exclusion; existence alone is not a held lock. |
+| `.meeting-transcript/meeting-transcript.lock` | Kernel-backed writer exclusion; existence alone is not a held lock. |
+
+Upgrade note: older versions used `.meeting-transcript/workflow.lock`. Stop all old import processes before upgrading; mixed old/new writers use different locks and are unsupported. The CLI never deletes or migrates the old file automatically. A leftover old lock is not an active-lock signal; do not remove or rename a held lock.
 
 State/journal use versioned fenced TOML in Markdown. After interruption, replay the same approved plan with fresh calendar input or generate a new read-only preview reconciling journaled outcomes; a new plan needs approval. Prove outputs through recorded hashes/identities. Unverifiable outcomes require manual reconciliation, not journal deletion or state edits to bypass errors.
 

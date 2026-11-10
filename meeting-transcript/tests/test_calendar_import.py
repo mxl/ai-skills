@@ -1344,6 +1344,33 @@ class CalendarWorkflowTests(unittest.TestCase):
         state = self.data((self.settings / 'state.md').read_text())
         self.assertEqual(state['meetings'][0]['artifacts'][0]['original_path'], str(recording.resolve()))
 
+    def test_apply_sets_up_gitignore_and_uses_named_lock_without_legacy_file(self):
+        self.package()
+        self.assertFalse((self.project / '.gitignore').exists())
+        original_config = self.config.read_bytes()
+        path, approval = self.save_plan(self.preview())
+        self.assertFalse((self.project / '.gitignore').exists())
+        self.apply(path, approval)
+        rules = (self.project / '.gitignore').read_bytes().splitlines()
+        self.assertIn(b'/.granola/', rules)
+        self.assertIn(b'/.meeting-transcript/meeting-transcript.lock', rules)
+        self.assertTrue((self.settings / 'meeting-transcript.lock').is_file())
+        self.assertFalse((self.settings / 'workflow.lock').exists())
+        self.assertEqual(self.config.read_bytes(), original_config)
+
+    def test_apply_refuses_unsafe_gitignore_before_import_or_state_writes(self):
+        self.package()
+        external = self.root / 'external-ignore'
+        external.write_bytes(b'preserve')
+        (self.project / '.gitignore').symlink_to(external)
+        path, approval = self.save_plan(self.preview())
+        result = self.apply(path, approval, ok=False)
+        self.assertNotIn('Traceback', result.stderr)
+        self.assertEqual(external.read_bytes(), b'preserve')
+        self.assertFalse((self.project / 'meetings').exists())
+        self.assertFalse((self.settings / 'state.md').exists())
+        self.assertFalse((self.settings / 'journal.md').exists())
+
     def test_two_cli_writers_cannot_mutate_concurrently_and_exit_releases_lock(self):
         self.package()
         path, approval = self.save_plan(self.preview())
@@ -1718,7 +1745,7 @@ class CalendarWorkflowTests(unittest.TestCase):
         self.package()
         path, approval = self.save_plan(self.preview())
         external = self.root / 'external-lock-target'
-        lock = self.settings / 'workflow.lock'
+        lock = self.settings / 'meeting-transcript.lock'
         for existing in (False, True):
             with self.subTest(existing=existing):
                 if existing:

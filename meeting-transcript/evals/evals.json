@@ -51,6 +51,7 @@
       "expected_output": "Fetches new Granola data through its skill with confirmation safeguards, then previews all three sources without replacing configured roots or assuming old project settings disable Granola.",
       "files": [],
       "assertions": [
+        "Runs idempotent calendar setup for the resolved project before first acquisition, automatically ignoring .granola/ and .meeting-transcript/meeting-transcript.lock without ignoring state/plans or untracking existing files.",
         "Generic import includes a new Granola fetch, OBS discovery and Amanu discovery.",
         "Uses the resolved synchronization period including older pending meetings and the same Granola export root for fetch and preview.",
         "Uses strict acquisition completion and retains patch/restart and version-drift safeguards.",

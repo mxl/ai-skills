@@ -2,6 +2,49 @@
   "skill_name": "meeting-transcript",
   "evals": [
     {
+      "id": 13,
+      "name": "generic-import-all-three",
+      "category": "calendar-import",
+      "prompt": "Импортируй встречи проекта за согласованный период. Календарь и назначение настроены; в старом project config sources = [obs, amanu].",
+      "expected_output": "Fetches new Granola data through its skill with confirmation safeguards, then previews all three sources without replacing configured roots or assuming old project settings disable Granola.",
+      "files": [],
+      "assertions": [
+        "Generic import includes a new Granola fetch, OBS discovery and Amanu discovery.",
+        "Uses the resolved synchronization period including older pending meetings and the same Granola export root for fetch and preview.",
+        "Uses strict acquisition completion and retains patch/restart and version-drift safeguards.",
+        "Uses additive granola-dir or an equivalent full three-source selection, not a Granola-only replacement of recording roots.",
+        "Does not fetch or import actual user data during a simulated evaluation."
+      ]
+    },
+    {
+      "id": 14,
+      "name": "granola-partial-acquisition",
+      "category": "calendar-import",
+      "prompt": "Во время импорта Granola вернула часть транскриптов, но один API-запрос упал, а в .granola остались старые экспорты. OBS и Amanu доступны. Заверши синхронизацию.",
+      "expected_output": "Reports incomplete acquisition, preserves the successful boundary and offers retry or a diagnostic-only preview rather than silently substituting stale local exports.",
+      "files": [],
+      "assertions": [
+        "Distinguishes partial acquisition from a valid empty result.",
+        "Does not advance the boundary or call the all-source synchronization complete.",
+        "Stops or generates a diagnostic preview marked source-acquisition-incomplete granola that cannot be applied.",
+        "Does not bypass patch/version-drift safeguards to force a retry."
+      ]
+    },
+    {
+      "id": 15,
+      "name": "three-source-competing-transcripts",
+      "category": "calendar-import",
+      "prompt": "У одной встречи подтверждены OBS, Amanu и Granola. В Amanu и Granola разные готовые транскрипты. Импортируй встречу один раз и приведи исходники к календарным названиям.",
+      "expected_output": "Asks which transcript to use, groups all sources under one event, keeps Granola exports immutable and applies OBS/Amanu renames only with existing approval/release checks.",
+      "files": [],
+      "assertions": [
+        "Requires a transcript choice rather than silently preferring Amanu or Granola or merging different speech.",
+        "Imports one canonical document for the event and retains all three source associations.",
+        "Keeps Granola filenames and content unchanged.",
+        "Retains exact-plan approval and source-release checks for OBS/Amanu renames."
+      ]
+    },
+    {
       "id": 12,
       "name": "native-release-success-and-refusal",
       "category": "calendar-import",

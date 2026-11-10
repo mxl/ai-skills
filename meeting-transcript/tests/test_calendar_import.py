@@ -57,6 +57,387 @@ class CalendarWorkflowTests(unittest.TestCase):
         self.events = [self.event()]
         self.save_calendar()
 
+    def granola_export(self, content=None, name='opaque-export.md'):
+        root = self.root / 'granola'
+        root.mkdir(exist_ok=True)
+        if content is None:
+            content = CANONICAL.replace('  - amanu\n', '  - granola\ntags: []\naliases: []\nspeaker_labels: heuristic-source-collective\n')
+        path = root / name
+        path.write_text(content)
+        return path
+
+    def test_granola_additive_directory_imports_canonical_frontmatter_unchanged(self):
+        source = self.granola_export()
+        before = source.read_bytes(), source.stat().st_mtime_ns
+        report = self.preview('--granola-dir', source.parent)
+        plan = self.data(report.stdout)
+        self.assertEqual([s['type'] for s in plan['config']['sources']], ['obs', 'amanu', 'granola'])
+        self.assertEqual(plan['meetings'][0]['status'], 'ready')
+        self.assertEqual(plan['artifacts'][0]['type'], 'granola')
+        path, approval = self.save_plan(report)
+        self.apply(path, approval)
+        imported = list((self.project / 'meetings').rglob('transcript.md'))
+        self.assertEqual(len(imported), 1)
+        self.assertEqual(imported[0].read_bytes(), before[0])
+        self.assertEqual((source.read_bytes(), source.stat().st_mtime_ns), before)
+
+    def test_incomplete_granola_acquisition_previews_ready_sources_but_cannot_advance(self):
+        self.package()
+        missing = self.root / 'not-yet-exported'
+        report = self.preview('--granola-dir', missing, '--source-acquisition-incomplete', 'granola', '--source-acquisition-incomplete', 'granola')
+        plan = self.data(report.stdout)
+        self.assertEqual(plan['source_acquisition_incomplete'], ['granola'])
+        self.assertEqual(plan['meetings'][0]['status'], 'ready')
+        self.assertEqual(plan['source_errors'][0]['type'], 'granola')
+        path, approval = self.save_plan(report)
+        result = self.apply(path, approval, ok=False)
+        self.assertIn('acquisition incomplete', result.stderr)
+        self.assertFalse((self.settings / 'state.md').exists())
+        self.assertFalse((self.settings / 'journal.md').exists())
+        self.assertFalse((self.project / 'meetings').exists())
+        self.assertFalse(missing.exists())
+        invalid = self.preview('--source-acquisition-incomplete', 'other', ok=False)
+        self.assertIn('invalid choice', invalid.stderr)
+
+    def test_granola_unsafe_exports_are_isolated_without_following_or_blocking(self):
+        source = self.granola_export()
+        outside = self.root / 'private.md'
+        outside.write_text('Never read this as an export')
+        link = source.parent / 'symlink.md'
+        link.symlink_to(outside)
+        fifo = source.parent / 'pipe.md'
+        os.mkfifo(fifo)
+        directory = source.parent / 'directory.md'
+        directory.mkdir()
+        report = self.preview('--granola-dir', source.parent)
+        plan = self.data(report.stdout)
+        self.assertEqual(len(plan['artifacts']), 4)
+        rejected = [a for a in plan['artifacts'] if a['status'] == 'unverified']
+        self.assertEqual(len(rejected), 3)
+        self.assertTrue(all('unsafe Granola' in a['warning'] and not a['transcripts'] for a in rejected))
+        self.assertEqual(plan['meetings'][0]['status'], 'ready')
+        path, approval = self.save_plan(report)
+        self.apply(path, approval)
+        self.assertEqual(len(list((self.project / 'meetings').rglob('transcript.md'))), 1)
+        self.assertEqual(outside.read_text(), 'Never read this as an export')
+        self.assertTrue(link.is_symlink())
+        self.assertTrue(fifo.exists())
+
+    def test_all_three_sources_group_once_dedupe_identical_canonical_bytes_and_repeat(self):
+        source = self.granola_export()
+        self.package(content=source.read_text())
+        recording = self.obs / 'arbitrary-name.mkv'
+        recording.write_bytes(b'synthetic video placeholder')
+        self.metadata(recording)
+        report = self.preview('--granola-dir', source.parent)
+        plan = self.data(report.stdout)
+        self.assertEqual(len(plan['meetings']), 1)
+        meeting = plan['meetings'][0]
+        self.assertEqual(len(meeting['artifact_ids']), 3)
+        self.assertEqual(len(meeting['transcripts']), 2)
+        self.assertEqual(len({t['content_sha256'] for t in meeting['transcripts']}), 1)
+        self.assertEqual(meeting['status'], 'ready')
+        path, approval = self.save_plan(report)
+        self.apply(path, approval)
+        output = next((self.project / 'meetings').rglob('transcript.md'))
+        before = output.read_bytes(), output.stat().st_mtime_ns
+        state = self.data((self.settings / 'state.md').read_text())
+        self.assertEqual(len(state['meetings']), 1)
+        self.assertEqual({a['type'] for a in state['meetings'][0]['artifacts']}, {'obs', 'amanu', 'granola'})
+        repeat = self.preview('--granola-dir', source.parent, '--until', '2026-08-03T00:00:00Z', start=False)
+        self.assertEqual(self.data(repeat.stdout)['meetings'][0]['status'], 'imported')
+        path, approval = self.save_plan(repeat)
+        self.apply(path, approval)
+        self.assertEqual((output.read_bytes(), output.stat().st_mtime_ns), before)
+        self.assertEqual(len(list((self.project / 'meetings').rglob('transcript.md'))), 1)
+        self.assertEqual(list(source.parent.iterdir()), [source])
+
+    def test_granola_and_amanu_compete_without_hidden_winner_then_explicit_retry(self):
+        source = self.granola_export()
+        self.package()
+        report = self.preview('--granola-dir', source.parent)
+        plan = self.data(report.stdout)
+        meeting = plan['meetings'][0]
+        self.assertEqual(meeting['status'], 'pending')
+        self.assertEqual(meeting['reason'], 'choose competing transcripts')
+        self.assertEqual(meeting['selected_transcript'], '')
+        path, approval = self.save_plan(report)
+        self.apply(path, approval)
+        self.assertFalse((self.project / 'meetings').exists())
+        state = self.data((self.settings / 'state.md').read_text())
+        self.assertEqual(len(state['meetings'][0]['artifacts']), 2)
+        chosen = next(t for t in meeting['transcripts'] if t['path'] == str(source.resolve()))
+        report = self.preview('--granola-dir', source.parent, '--until', '2026-08-03T00:00:00Z', '--transcript', meeting['event']['key'] + '=' + chosen['id'], start=False)
+        self.assertEqual(self.data(report.stdout)['meetings'][0]['status'], 'ready')
+        path, approval = self.save_plan(report)
+        self.apply(path, approval)
+        output = list((self.project / 'meetings').rglob('transcript.md'))
+        self.assertEqual(len(output), 1)
+        self.assertEqual(output[0].read_bytes(), source.read_bytes())
+
+    def test_granola_modified_raw_source_refuses_approved_plan_without_import_or_boundary(self):
+        source = self.granola_export()
+        path, approval = self.save_plan(self.preview('--granola-dir', source.parent))
+        original = source.stat()
+        source.write_text(source.read_text().replace('Keep this exact.', 'Fake this exact.'))
+        os.utime(source, ns=(original.st_atime_ns, original.st_mtime_ns))
+        result = self.apply(path, approval, ok=False)
+        self.assertRegex(result.stderr, r'(source|inventory) changed')
+        self.assertFalse((self.project / 'meetings').exists())
+        self.assertFalse((self.settings / 'state.md').exists())
+
+    def test_granola_rename_request_is_reported_blocked_even_with_idle_attestation(self):
+        source = self.granola_export()
+        initial = self.data(self.preview('--granola-dir', source.parent).stdout)
+        artifact_id = initial['artifacts'][0]['id']
+        report = self.preview('--granola-dir', source.parent, '--rename', artifact_id, '--idle-source', artifact_id)
+        artifact = self.data(report.stdout)['artifacts'][0]
+        self.assertTrue(artifact['rename_requested'])
+        self.assertEqual(artifact['proposed_path'], '')
+        self.assertIn('renames prohibited', artifact['rename_blocked'])
+        path, approval = self.save_plan(report)
+        self.apply(path, approval, '--allow-source-renames')
+        self.assertEqual(list(source.parent.iterdir()), [source])
+        self.assertEqual(next((self.project / 'meetings').rglob('transcript.md')).read_bytes(), source.read_bytes())
+
+    def test_granola_config_selection_and_explicit_source_override(self):
+        source = self.granola_export()
+        with self.global_config.open('a') as handle:
+            handle.write('[sources.notes]\ntype = "granola"\npath = ' + json.dumps(str(source.parent)) + '\n')
+        self.config.write_text(self.config.read_text().replace('sources = ["obs", "amanu"]', 'sources = ["obs", "amanu", "notes"]'))
+        plan = self.data(self.preview().stdout)
+        self.assertEqual([s['name'] for s in plan['config']['sources']], ['obs', 'amanu', 'notes'])
+        self.assertEqual(plan['artifacts'][0]['source'], 'notes')
+        self.assertEqual(plan['meetings'][0]['status'], 'ready')
+        same = self.data(self.preview('--granola-dir', source.parent).stdout)
+        self.assertEqual(len(same['artifacts']), 1)
+        explicit = self.data(self.preview('--source', 'granola=' + str(source.parent)).stdout)
+        self.assertEqual([s['type'] for s in explicit['config']['sources']], ['granola'])
+        self.assertEqual(explicit['meetings'][0]['status'], 'ready')
+        self.config.write_text(self.config.read_text().replace(', "notes"', ''))
+        self.assertEqual(self.data(self.preview().stdout)['artifacts'], [])
+
+    def test_missing_granola_directory_has_actionable_error_without_silent_absence(self):
+        missing = self.root / 'missing-exports'
+        result = self.preview('--granola-dir', missing, ok=False)
+        self.assertIn('fetch with explicit --out after approval', result.stderr)
+        self.assertFalse(missing.exists())
+
+    def test_granola_metadata_not_filename_controls_matching_and_missing_end_needs_choice(self):
+        source = self.granola_export(name='Planning-calendar-one.md')
+        content = source.read_text().replace('# Transcript: Planning', '# Transcript: Other title').replace('- Ended: 2026-08-01T10:00:00Z', '- Ended: Unknown')
+        source.write_text(content)
+        report = self.preview('--granola-dir', source.parent)
+        plan = self.data(report.stdout)
+        artifact = plan['artifacts'][0]
+        meeting = plan['meetings'][0]
+        self.assertEqual(artifact['status'], 'verified')
+        self.assertEqual(artifact['event_key'], '')
+        self.assertEqual(meeting['status'], 'pending')
+        self.assertIn('choose --match', meeting['reason'])
+        self.assertEqual(artifact['candidates'], [meeting['event']['key']])
+        report = self.preview('--granola-dir', source.parent, '--match', artifact['id'] + '=' + meeting['event']['key'])
+        self.assertEqual(self.data(report.stdout)['meetings'][0]['status'], 'ready')
+        path, approval = self.save_plan(report)
+        self.apply(path, approval)
+        output = next((self.project / 'meetings').rglob('transcript.md'))
+        self.assertEqual(output.read_text(), content)
+        repeat = self.data(self.preview('--granola-dir', source.parent, '--until', '2026-08-03T00:00:00Z', start=False).stdout)
+        self.assertEqual(repeat['artifacts'][0]['event_key'], meeting['event']['key'])
+        self.assertIn('persisted explicit association', ' '.join(repeat['artifacts'][0]['evidence']))
+
+    def test_granola_unknown_calendar_times_require_explicit_match_not_date_identity(self):
+        source = self.granola_export()
+        source.write_text(source.read_text().replace('2026-08-01T09:00:00Z', 'Unknown').replace('2026-08-01T10:00:00Z', 'Unknown'))
+        plan = self.data(self.preview('--granola-dir', source.parent).stdout)
+        artifact = plan['artifacts'][0]
+        self.assertEqual(artifact['status'], 'verified')
+        self.assertEqual(artifact['candidates'], [])
+        self.assertEqual(plan['meetings'][0]['status'], 'pending')
+        chosen = self.data(self.preview('--granola-dir', source.parent, '--match', artifact['id'] + '=' + plan['meetings'][0]['event']['key']).stdout)
+        self.assertEqual(chosen['meetings'][0]['status'], 'ready')
+
+    def test_granola_invalid_aware_times_date_or_interval_are_isolated(self):
+        source = self.granola_export()
+        for name, old, new in (
+            ('naive', '2026-08-01T09:00:00Z', '2026-08-01T09:00:00'),
+            ('date', '- Meeting date: 2026-08-01', '- Meeting date: 2026-08-02'),
+            ('bad-date', '- Meeting date: 2026-08-01', '- Meeting date: invalid'),
+            ('reversed', '2026-08-01T10:00:00Z', '2026-08-01T08:00:00Z'),
+        ):
+            self.granola_export(source.read_text().replace(old, new), name=name + '.md')
+        plan = self.data(self.preview('--granola-dir', source.parent).stdout)
+        self.assertEqual(len(plan['artifacts']), 5)
+        self.assertEqual(sum(a['status'] == 'unverified' for a in plan['artifacts']), 4)
+        self.assertEqual(plan['meetings'][0]['status'], 'ready')
+        self.assertTrue(all(not a['transcripts'] for a in plan['artifacts'] if a['status'] == 'unverified'))
+
+    def test_granola_canonical_digest_is_revalidated_and_heuristic_flags_preserved(self):
+        source = self.granola_export()
+        source.write_text(source.read_text().replace('heuristic-source-collective', 'heuristic-source') + '\n\n')
+        report = self.preview('--granola-dir', source.parent)
+        approved = self.data(report.stdout)['artifacts'][0]['transcripts'][0]
+        expected = source.read_bytes().rstrip() + b'\n'
+        self.assertEqual(approved['sha256'], hashlib.sha256(source.read_bytes()).hexdigest())
+        self.assertEqual(approved['content_sha256'], hashlib.sha256(expected).hexdigest())
+        self.assertNotEqual(approved['sha256'], approved['content_sha256'])
+        # Even a newly approved edited plan cannot import content with the wrong derived digest.
+        forged = report.stdout.replace(approved['content_sha256'], '0' * 64)
+        path = self.root / 'plan.md'
+        path.write_text(forged)
+        approval = hashlib.sha256(path.read_bytes()).hexdigest()
+        result = self.apply(path, approval, ok=False)
+        self.assertIn('changed', result.stderr)
+        self.assertFalse((self.settings / 'state.md').exists())
+        path, approval = self.save_plan(report)
+        self.apply(path, approval)
+        self.assertEqual(next((self.project / 'meetings').rglob('transcript.md')).read_bytes(), expected)
+        self.assertTrue(source.read_bytes().endswith(b'\n\n\n'))
+
+    def test_native_amanu_and_granola_candidates_require_transcript_choice(self):
+        source = self.granola_export()
+        self.native_package()
+        plan = self.data(self.preview('--granola-dir', source.parent).stdout)
+        artifact = next(a for a in plan['artifacts'] if a['type'] == 'amanu')
+        event_key = plan['meetings'][0]['event']['key']
+        report = self.preview('--granola-dir', source.parent, '--match', artifact['id'] + '=' + event_key)
+        meeting = self.data(report.stdout)['meetings'][0]
+        self.assertEqual(len(meeting['transcripts']), 2)
+        self.assertEqual(meeting['status'], 'pending')
+        self.assertEqual(meeting['selected_transcript'], '')
+        self.assertEqual(meeting['reason'], 'choose competing transcripts')
+
+    def test_granola_raw_hash_is_rechecked_immediately_before_publication(self):
+        source = self.granola_export()
+        path, approval = self.save_plan(self.preview('--granola-dir', source.parent))
+        process = self.start_checkpoint(path, approval, 'before-exclusive-publish')
+        original = source.stat()
+        source.write_text(source.read_text().replace('Keep this exact.', 'Late this exact.'))
+        os.utime(source, ns=(original.st_atime_ns, original.st_mtime_ns))
+        stdout, stderr = process.communicate('\n', timeout=20)
+        self.assertNotEqual(process.returncode, 0, stdout + stderr)
+        self.assertIn('transcript changed', stderr)
+        self.assertEqual(list((self.project / 'meetings').rglob('transcript.md')), [])
+        self.assertFalse((self.settings / 'state.md').exists())
+        self.assertIn('Late this exact.', source.read_text())
+
+    def test_incomplete_source_acquisition_preserves_existing_boundary_for_all_types(self):
+        self.package()
+        path, approval = self.save_plan(self.preview())
+        self.apply(path, approval)
+        original = (self.settings / 'state.md').read_bytes()
+        output = next((self.project / 'meetings').rglob('transcript.md'))
+        before = output.read_bytes(), output.stat().st_mtime_ns
+        for source_type in ('obs', 'amanu', 'granola'):
+            with self.subTest(source_type=source_type):
+                report = self.preview('--until', '2026-08-03T00:00:00Z', '--source-acquisition-incomplete', source_type, start=False)
+                path, approval = self.save_plan(report)
+                self.assertIn('acquisition incomplete', self.apply(path, approval, ok=False).stderr)
+                self.assertEqual((self.settings / 'state.md').read_bytes(), original)
+                self.assertEqual((output.read_bytes(), output.stat().st_mtime_ns), before)
+                self.assertFalse((self.settings / 'journal.md').exists())
+
+    def test_granola_inventory_changes_after_preview_refuse_before_writes(self):
+        source = self.granola_export()
+        for mutation in ('add', 'delete', 'rename', 'unsafe'):
+            with self.subTest(mutation=mutation):
+                source.write_text(CANONICAL.replace('  - amanu\n', '  - granola\n'))
+                path, approval = self.save_plan(self.preview('--granola-dir', source.parent))
+                extra = source.parent / 'fresh-export.md'
+                renamed = source.parent / 'renamed.md'
+                if mutation == 'add':
+                    extra.write_text(source.read_text().replace('Keep this exact.', 'Competing new speech.'))
+                elif mutation == 'delete':
+                    source.unlink()
+                elif mutation == 'rename':
+                    source.rename(renamed)
+                else:
+                    extra.symlink_to(source)
+                result = self.apply(path, approval, ok=False)
+                self.assertIn('Granola discovery inventory changed', result.stderr)
+                self.assertFalse((self.settings / 'state.md').exists())
+                self.assertFalse((self.settings / 'journal.md').exists())
+                self.assertFalse((self.project / 'meetings').exists())
+                extra.unlink(missing_ok=True)
+                renamed.unlink(missing_ok=True)
+
+    def test_new_granola_export_before_publication_refuses_without_advancing_boundary(self):
+        source = self.granola_export()
+        path, approval = self.save_plan(self.preview('--granola-dir', source.parent))
+        process = self.start_checkpoint(path, approval, 'before-exclusive-publish')
+        self.granola_export(source.read_text().replace('Keep this exact.', 'Competing new speech.'), name='fresh-export.md')
+        stdout, stderr = process.communicate('\n', timeout=20)
+        self.assertNotEqual(process.returncode, 0, stdout + stderr)
+        self.assertIn('Granola discovery inventory changed', stderr)
+        self.assertEqual(list((self.project / 'meetings').rglob('transcript.md')), [])
+        self.assertFalse((self.settings / 'state.md').exists())
+
+    def test_granola_inventory_baseline_is_captured_before_discovery(self):
+        source = self.granola_export()
+        command = [sys.executable, str(SCRIPT), 'calendar', 'preview', '--project', str(self.project), '--global-config', str(self.global_config), '--calendar', str(self.calendar), '--since', '2026-08-01T00:00:00Z', '--until', '2026-08-02T00:00:00Z', '--granola-dir', str(source.parent)]
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env={**os.environ, 'MEETING_TRANSCRIPT_TEST_CHECKPOINT': 'granola-after-discovery'})
+        def cleanup():
+            if process.poll() is None:
+                process.kill()
+            process.communicate()
+        self.addCleanup(cleanup)
+        self.assertEqual(process.stdout.readline().strip(), 'test: checkpoint granola-after-discovery')
+        self.granola_export(source.read_text().replace('Keep this exact.', 'Unreviewed new speech.'), name='during-discovery.md')
+        stdout, stderr = process.communicate('\n', timeout=20)
+        self.assertNotEqual(process.returncode, 0, stdout + stderr)
+        self.assertIn('Granola discovery inventory changed', stderr)
+        self.assertNotIn('Meeting calendar preview', stdout)
+        self.assertFalse((self.settings / 'state.md').exists())
+
+    def test_granola_inventory_rechecked_before_final_watermark(self):
+        source = self.granola_export()
+        path, approval = self.save_plan(self.preview('--granola-dir', source.parent))
+        process = self.start_checkpoint(path, approval, 'before-final-watermark')
+        self.granola_export(source.read_text().replace('Keep this exact.', 'Late competing speech.'), name='late-export.md')
+        stdout, stderr = process.communicate('\n', timeout=20)
+        self.assertNotEqual(process.returncode, 0, stdout + stderr)
+        self.assertIn('Granola discovery inventory changed', stderr)
+        state = self.data((self.settings / 'state.md').read_text())
+        self.assertEqual(state['period_end'], '')
+        self.assertEqual(state['generation'], 0)
+        self.assertTrue((self.settings / 'journal.md').exists())
+
+    def test_multiple_granola_roots_bind_all_top_level_names(self):
+        source = self.granola_export()
+        other = self.root / 'second-granola'
+        other.mkdir()
+        (other / 'same.md').write_bytes(source.read_bytes())
+        with self.global_config.open('a') as handle:
+            for name, root in (('first', source.parent), ('second', other)):
+                handle.write('[sources.' + name + ']\ntype = "granola"\npath = ' + json.dumps(str(root)) + '\n')
+        self.config.write_text(self.config.read_text().replace('sources = ["obs", "amanu"]', 'sources = ["obs", "amanu", "first", "second"]'))
+        report = self.preview()
+        sources = [s for s in self.data(report.stdout)['config']['sources'] if s['type'] == 'granola']
+        self.assertEqual(len(sources), 2)
+        self.assertTrue(all(len(s['discovery_inventory_sha256']) == 64 for s in sources))
+        path, approval = self.save_plan(report)
+        (other / 'not-an-export.txt').write_text('new top-level name also invalidates review')
+        result = self.apply(path, approval, ok=False)
+        self.assertIn('Granola discovery inventory changed', result.stderr)
+        self.assertFalse((self.settings / 'state.md').exists())
+        self.assertFalse((self.project / 'meetings').exists())
+
+    def test_granola_unverified_entry_becoming_ready_with_same_stat_invalidates_inventory(self):
+        source = self.granola_export()
+        canonical = source.read_text().replace('Keep this exact.', 'Competing speech')
+        extra = self.granola_export(canonical.replace('# Transcript:', '# Tranzcript:'), name='initially-invalid.md')
+        report = self.preview('--granola-dir', source.parent)
+        self.assertEqual(self.data(report.stdout)['meetings'][0]['status'], 'ready')
+        path, approval = self.save_plan(report)
+        original = extra.stat()
+        extra.write_text(canonical)
+        os.utime(extra, ns=(original.st_atime_ns, original.st_mtime_ns))
+        self.assertEqual(extra.stat().st_size, original.st_size)
+        result = self.apply(path, approval, ok=False)
+        self.assertIn('Granola discovery inventory changed', result.stderr)
+        self.assertFalse((self.settings / 'state.md').exists())
+        self.assertFalse((self.project / 'meetings').exists())
+
     def event(self, event_id='one', **changes):
         value = dict(calendar_id='work', event_id=event_id, recurrence_id='', title='Planning', start='2026-08-01T09:00:00Z', end='2026-08-01T10:00:00Z')
         value.update(changes)

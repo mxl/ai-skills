@@ -292,6 +292,8 @@ def build_parser() -> argparse.ArgumentParser:
     preview.add_argument("--timezone")
     preview.add_argument("--destination")
     preview.add_argument("--source", action="append", help="TYPE=absolute-path; replaces configured discovery")
+    preview.add_argument("--granola-dir", help="existing absolute canonical Granola export directory; adds to configured sources")
+    preview.add_argument("--source-acquisition-incomplete", action="append", choices=("obs", "amanu", "granola"), default=[], help="source type whose caller-managed acquisition failed/incomplete; preview only, apply is blocked")
     preview.add_argument("--since")
     preview.add_argument("--until")
     preview.add_argument("--match", action="append", default=[], help="artifact-id=event-key")

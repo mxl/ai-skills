@@ -28,9 +28,15 @@ One-run overrides do not persist into configuration:
 --timezone IANA_ZONE
 --destination RELATIVE_PATH
 --source TYPE=/absolute/root repeatable, replaces configured discovery roots
+--granola-dir /absolute/root adds Granola without replacing recording roots
+--source-acquisition-incomplete TYPE repeatable: obs, amanu, granola; diagnostic only
 ```
 
-Source types are `obs` or `amanu`. These workflow overrides refer to source directories; an explicit canonical transcript file continues to use the existing direct `import SOURCE --out DIRECTORY` command.
+Source types are `obs`, `amanu` or `granola`. These workflow overrides refer to source directories; an explicit canonical transcript file continues to use the existing direct `import SOURCE --out DIRECTORY` command.
+
+The generic skill workflow acquires new Granola transcripts before preview and passes the resolved export root through `--granola-dir`. See [granola-import.md](granola-import.md) for date coverage, strict acquisition status and confirmation requirements. Existing OBS/Amanu configuration need not be replaced. A configured Granola source is an alternative to the additive option; use one consistent root.
+
+A preview marked `--source-acquisition-incomplete granola` (or another supported source type) may show the available candidates, but cannot be applied or advance the synchronization boundary. A missing Granola export directory can be shown as a source error only when its acquisition is explicitly marked incomplete; this diagnostic preview creates no directory. Re-fetch successfully and regenerate the preview first. This marker reports a failed acquisition; omission is not a script-issued proof that the caller ran Granola or fetched every provider page.
 
 Choices use IDs printed in preview and may be repeated:
 
@@ -103,6 +109,12 @@ An incomplete fetch must not be presented as a complete envelope. The script can
 Native Amanu uses the observed `meta.json`, `transcript.json`, and optional `speakers.json` contract described in [native-recordings.md](native-recordings.md). Its timestamped native Markdown is not assumed to be canonical. Conversion reads validated structured segments and preserves source text in canonical Markdown without creating adapter files in the package. Unchanged raw inputs and derived output are checked again at apply.
 
 Native recording interval or OBS container timing can produce candidate events, but interval proximity alone does not assign a meeting. Use explicit match choices when native sources lack verified event identity or a true meeting title. A matched, requested native rename with explicit idle attestation runs the bounded release-observation protocol; eligible results permit actual rename, while busy or unknown results block it. Neither a user download nor an import request is idle attestation. Native completion, proof scope and remaining races are documented in [native-release.md](native-release.md).
+
+## Granola canonical exports
+
+A `granola` source contains top-level canonical Markdown exports produced by the Granola skill. The importer validates their documented template metadata and transcript, derives association evidence from actual titles and timezone-aware times, and binds the original input, canonical output hashes and discovery inventory. New, removed or replaced exports invalidate a reviewed candidate set; apply must not silently ignore a newly competing transcript. Granola document IDs and export filenames are not calendar identities. Uncertain metadata or ambiguous associations remain pending for explicit choice.
+
+Granola files are never renamed or rewritten by calendar import. A rename request for a Granola artifact is blocked; the OBS/Amanu rename protocol does not apply to it. Different Granola/Amanu canonical candidates for one event require selection, while byte-identical candidates are deduplicated. One event still produces one imported transcript with all confirmed source associations retained.
 
 ## Normalized artifact contract
 

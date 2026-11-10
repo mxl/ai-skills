@@ -1,7 +1,8 @@
 """On-demand, fail-closed calendar import orchestration (stdlib, Python 3.11+).
 
-Supports normalized metadata and read-only native Amanu JSON snapshots.
-Native transcript readiness does not establish rename safety. No authentication lives here.
+Supports normalized metadata, read-only native Amanu JSON snapshots and canonical
+Granola Markdown exports. Acquisition remains caller-managed. Native transcript
+readiness does not establish rename safety. No authentication lives here.
 Persisted workflow documents are Markdown containing a versioned TOML block.
 """
 from __future__ import annotations
@@ -247,12 +248,27 @@ def configuration(args):
             if set(source) != {'type', 'path'}:
                 raise Error('sources require only type and path; credentials are prohibited')
             sources.append({'name': name, **source})
+    if args.granola_dir:
+        granola_path = Path(args.granola_dir).expanduser()
+        existing = [s for s in sources if s['type'] == 'granola']
+        if existing and not any(Path(s['path']).expanduser() == granola_path for s in existing):
+            raise Error('--granola-dir conflicts with selected configured Granola source; select one export directory explicitly')
+        if not existing:
+            name = 'granola'
+            if any(s['name'] == name for s in sources):
+                raise Error('source name granola is already used by another type')
+            sources.append(dict(name=name, type='granola', path=str(granola_path)))
+    source_errors = []
     for source in sources:
         p = Path(source['path']).expanduser()
-        if source['type'] not in ('obs', 'amanu') or not p.is_absolute() or not p.is_dir() or p.is_symlink():
-            raise Error('sources must be existing absolute OBS/Amanu directories, not symlinks')
+        missing_granola = (source['type'] == 'granola' and 'granola' in args.source_acquisition_incomplete
+                           and p.is_absolute() and not p.exists() and not p.is_symlink())
+        if missing_granola:
+            source_errors.append(dict(name=source['name'], type='granola', path=str(p.resolve()), reason='Granola export directory missing and acquisition incomplete; fetch with explicit --out after approval, then regenerate preview'))
+        elif source['type'] not in ('obs', 'amanu', 'granola') or not p.is_absolute() or not p.is_dir() or p.is_symlink():
+            raise Error('sources must be existing absolute OBS/Amanu/Granola directories, not symlinks; for Granola resolve an export directory, fetch with explicit --out after approval, then retry preview')
         source['path'] = str(p.resolve())
-    return dict(project=str(project), provider=values['provider'], calendars=values['calendars'], timezone=values['timezone'], destination=str(contained(project, values['destination'])), sources=sources,
+    return dict(project=str(project), provider=values['provider'], calendars=values['calendars'], timezone=values['timezone'], destination=str(contained(project, values['destination'])), sources=sources, source_errors=source_errors,
                 config_files=[dict(path=str(p), sha256=digest(p.read_bytes()) if p.exists() else '') for p in (global_path, local_path)])
 
 
@@ -436,10 +452,138 @@ def observe_native_release(artifact, cutoff):
     return proof
 
 
+def granola_inventory(path):
+    """Bind all top-level names and no-follow identities, never export speech or PIDs."""
+    def signature(value):
+        return [value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_mode]
+
+    try:
+        with directory_anchor(Path(path), label='Granola discovery root') as (descriptor, verify):
+            before = signature(os.fstat(descriptor))
+            entries = []
+            for name in sorted(os.listdir(descriptor)):
+                current = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+                identity = signature(current)
+                checksum = ''
+                if stat.S_ISREG(current.st_mode):
+                    # Invalid exports can become ready without changing size/mtime;
+                    # bind their bytes too, not only currently ready candidates.
+                    child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=descriptor)
+                    with os.fdopen(child, 'rb') as handle:
+                        if signature(os.fstat(handle.fileno())) != identity:
+                            raise Error('Granola entry changed during inventory')
+                        hasher = hashlib.sha256()
+                        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                            hasher.update(chunk)
+                        if signature(os.fstat(handle.fileno())) != identity:
+                            raise Error('Granola entry changed during inventory')
+                        checksum = hasher.hexdigest()
+                if signature(os.stat(name, dir_fd=descriptor, follow_symlinks=False)) != identity:
+                    raise Error('Granola entry changed during inventory')
+                entries.append((name, identity, checksum))
+            verify()
+            if signature(os.fstat(descriptor)) != before:
+                raise Error('Granola discovery inventory changed during capture; regenerate preview')
+            return key(before, entries)
+    except (OSError, Error) as exc:
+        raise Error('Granola discovery inventory changed or unavailable; regenerate preview') from exc
+
+
+def validate_granola_inventories(config):
+    for source in config['sources']:
+        if source['type'] != 'granola':
+            continue
+        expected = source.get('discovery_inventory_sha256')
+        if not isinstance(expected, str) or not expected or granola_inventory(source['path']) != expected:
+            raise Error('Granola discovery inventory changed; regenerate preview to review all candidates')
+
+
+def granola_prepare(path):
+    """Read a canonical export without following links or blocking on special files."""
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, 'rb') as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise Error('Granola export must be a regular Markdown file')
+        raw = handle.read()
+    content = raw.decode('utf-8').replace('\r\n', '\n')
+    meeting = canonical.parse_transcript(content)
+    if meeting['source'] != 'granola' or not meeting['title'].strip():
+        raise Error('Granola export requires source: granola and a nonempty canonical title')
+    try:
+        meeting_date = datetime.strptime(meeting['meeting_date'], '%Y-%m-%d').date()
+        if meeting_date.isoformat() != meeting['meeting_date']:
+            raise ValueError('noncanonical date')
+    except ValueError as exc:
+        raise Error('Granola Meeting date must be YYYY-MM-DD') from exc
+    start = None if meeting['started_at'] == 'Unknown' else aware(meeting['started_at'])
+    end = None if meeting['ended_at'] == 'Unknown' else aware(meeting['ended_at'])
+    if start and start.date() != meeting_date:
+        raise Error('Granola Meeting date disagrees with Started date')
+    if start and end and end <= start:
+        raise Error('Granola Ended must be after Started')
+    return meeting, start, end, raw, (content.rstrip() + '\n').encode('utf-8')
+
+
+def discover_granola(source, events, associated):
+    """Canonical exports contain no provider event identity; filenames never supply it."""
+    artifacts = []
+    root = Path(source['path'])
+    if not root.exists():
+        return artifacts  # Configuration permits this only for explicitly incomplete acquisition.
+    for path in sorted(root.iterdir()):
+        if path.suffix.casefold() != '.md':
+            continue
+        current = path.lstat()
+        snapshot = dict(device=current.st_dev, inode=current.st_ino, size=current.st_size, mtime_ns=current.st_mtime_ns)
+        artifact = dict(id=key('granola', str(root), current.st_dev, current.st_ino), source=source['name'], type='granola',
+                        original_path=str(path), path=str(path), status='unverified', warning='', event_key='',
+                        candidates=[], evidence=[], transcripts=[], safe=False, metadata_path=str(path),
+                        metadata_sha256='', snapshot=snapshot, format='canonical_granola')
+        if not stat.S_ISREG(current.st_mode):
+            artifact.update(format='rejected_granola', warning='unsafe Granola export rejected: requires regular Markdown, never symlink/FIFO/device/directory')
+            artifacts.append(artifact)
+            continue
+        prior = next((a for a in associated if a['type'] == 'granola' and a['path'] == str(path)
+                      and a['snapshot']['device'] == current.st_dev and a['snapshot']['inode'] == current.st_ino), None)
+        if prior:
+            artifact.update(id=prior['id'], original_path=prior['original_path'])
+        try:
+            meeting, start, end, raw, output = granola_prepare(path)
+            artifact.update(status='verified', warning='read-only canonical Granola export; source renames prohibited',
+                            started_at=start.isoformat() if start else '', ended_at=end.isoformat() if end else '',
+                            processing='snapshot', metadata_sha256=digest(raw), snapshot=artifact_snapshot(path, True))
+            for event_key, event in events.items():
+                title_match = meeting['title'].casefold() == event['title'].casefold()
+                overlap = start and end and start < aware(event['end']) and end > aware(event['start'])
+                if overlap and title_match:
+                    artifact['candidates'].append(event_key)
+                    artifact['evidence'].append(event_key + ': exact canonical metadata title + intersecting aware Started/Ended interval')
+                elif start and aware(event['start']) <= start < aware(event['end']):
+                    artifact['candidates'].append(event_key)
+                    artifact['evidence'].append(event_key + ': Started is inside event, but title or complete interval missing; explicit choice required')
+            exact = [event_key for event_key in artifact['candidates'] if start and end
+                     and meeting['title'].casefold() == events[event_key]['title'].casefold()
+                     and start < aware(events[event_key]['end']) and end > aware(events[event_key]['start'])]
+            if len(artifact['candidates']) == 1 and len(exact) == 1:
+                artifact['event_key'] = exact[0]
+            artifact['transcripts'] = [dict(id=key(str(path)), path=str(path), sha256=digest(raw),
+                                             relative_path=path.name, format='canonical_granola', content_sha256=digest(output))]
+            if prior and not artifact['event_key'] and prior['event_key'] in events and artifact['snapshot'] == prior['snapshot'] and artifact['metadata_sha256'] == prior['metadata_sha256']:
+                artifact['event_key'] = prior['event_key']
+                artifact['evidence'].append('persisted explicit association and unchanged canonical export')
+        except (OSError, ValueError, KeyError, TypeError, Error) as exc:
+            artifact.update(status='unverified', transcripts=[], event_key='', warning=f'Granola canonical metadata/transcript unavailable or invalid: {exc}')
+        artifacts.append(artifact)
+    return artifacts
+
+
 def discover(config, events, state):
     artifacts = []
     associated = [a for meeting in state['meetings'] for a in meeting.get('artifacts', [])]
     for source in config['sources']:
+        if source['type'] == 'granola':
+            artifacts.extend(discover_granola(source, events, associated))
+            continue
         root = Path(source['path'])
         for path in sorted(root.iterdir()):
             if path.is_symlink() or (source['type'] == 'obs' and (not path.is_file() or path.suffix.casefold() not in ('.mkv', '.mp4', '.mov', '.avi', '.webm'))) or (source['type'] == 'amanu' and not path.is_dir()):
@@ -571,6 +715,9 @@ def validate_state_shape(state):
 
 
 def validate_plan_shape(plan):
+    incomplete = plan.get('source_acquisition_incomplete', [])
+    if not isinstance(incomplete, list) or any(v not in ('obs', 'amanu', 'granola') for v in incomplete):
+        raise Error('invalid plan.source_acquisition_incomplete: expected source-type list')
     require_fields(plan, dict(kind=str, config=dict, state_generation=int, state_sha256=str, recovery_journal_sha256=str, period_start=str, period_end=str, initial_start=str, calendar_snapshot=list, calendar_known_keys=list, meetings=list, artifacts=list), 'plan')
     config = plan['config']
     require_fields(config, dict(project=str, provider=str, calendars=list, timezone=str, destination=str, sources=list, config_files=list), 'plan.config')
@@ -631,6 +778,7 @@ def preview(args):
     if aware(period_end) > captured_now:
         raise Error('--until cannot be in the future; unfinished meetings must remain deferred')
     config = configuration(args)
+    source_errors = config.pop('source_errors')
     state = read_state(config['project'])
     actual_state_sha256 = state_hash(state)
     journal_path = Path(config['project']) / '.meeting-transcript' / 'journal.md'
@@ -649,7 +797,15 @@ def preview(args):
     missing_known = [m['event']['key'] for m in state['meetings'] if m['status'] != 'declined' and m['event']['key'] not in events]
     if missing_known:
         raise Error('calendar input omits known event identities; fetch known events as well as the new period: ' + ', '.join(missing_known))
+    for source in config['sources']:
+        if source['type'] == 'granola' and Path(source['path']).is_dir():
+            source['discovery_inventory_sha256'] = granola_inventory(source['path'])
     artifacts = discover(config, events, state)
+    checkpoint('granola-after-discovery')
+    # Never adopt a new baseline after discovery; compare to the pre-discovery one.
+    for source in config['sources']:
+        if source['type'] == 'granola' and 'discovery_inventory_sha256' in source:
+            validate_granola_inventories({'sources': [source]})
     matches = pairs(args.match, '--match')
     transcript_choices = pairs(args.transcript, '--transcript')
     by_id = {a['id']: a for a in artifacts}
@@ -670,6 +826,8 @@ def preview(args):
             if transcript.get('format') == 'native_amanu_json':
                 output, _ = native.prepare(Path(transcript['path']).parent, event['title'], transcript['inputs'])
                 transcript['title'] = event['title']
+            elif transcript.get('format') == 'canonical_granola':
+                output = prepare_snapshot(transcript)
             else:
                 output = canonical.prepare_import(Path(transcript['path']))[1]
             transcript['content_sha256'] = digest(output)
@@ -712,14 +870,16 @@ def preview(args):
         event = events.get(artifact['event_key'])
         if not event and len(artifact['candidates']) == 1:
             event = events[artifact['candidates'][0]]
-        proposed = str(Path(artifact['path']).with_name(safe_name(event, config['timezone']) + (Path(artifact['path']).suffix if artifact['type'] == 'obs' else ''))) if event else ''
+        proposed = str(Path(artifact['path']).with_name(safe_name(event, config['timezone']) + (Path(artifact['path']).suffix if artifact['type'] == 'obs' else ''))) if event and artifact['type'] != 'granola' else ''
         artifact['proposed_path'] = proposed
         artifact['rename_requested'] = artifact['id'] in args.rename
         artifact['idle_attested'] = artifact['id'] in args.idle_source
         artifact['collision'] = bool(proposed and proposed != artifact['path'] and Path(proposed).exists())
         meeting = next((m for m in meetings if m['event']['key'] == artifact['event_key']), None)
         blocked = ''
-        if not meeting or not meeting['selected'] or meeting['status'] in ('declined', 'deferred'):
+        if artifact['type'] == 'granola':
+            blocked = 'Granola canonical exports are read-only; source renames prohibited'
+        elif not meeting or not meeting['selected'] or meeting['status'] in ('declined', 'deferred'):
             blocked = 'meeting unresolved, deferred, declined or unselected'
         elif meeting['status'] == 'calendar-update' and not meeting['accept_update']:
             blocked = 'calendar update requires explicit --accept-update'
@@ -744,6 +904,8 @@ def preview(args):
     calendar_known_keys = [m['event']['key'] for m in state['meetings'] if m['status'] != 'declined']
     calendar_snapshot = relevant_calendar(events, period_start, period_end, calendar_known_keys)
     plan = dict(version=1, kind='meeting-calendar-plan', calendar_snapshot=calendar_snapshot, calendar_known_keys=calendar_known_keys, config=config, state_generation=state['generation'], state_sha256=actual_state_sha256, recovery_journal_sha256=recovery_journal_sha256, period_start=period_start, period_end=period_end, initial_start=state['initial_start'] or period_start, meetings=meetings, artifacts=artifacts)
+    plan['source_acquisition_incomplete'] = sorted(set(args.source_acquisition_incomplete))
+    plan['source_errors'] = source_errors
     print(markdown(plan, 'Meeting calendar preview'), end='')
     return 0
 
@@ -836,6 +998,7 @@ def reconcile_journal(journal, state):
 
 
 def validate_plan(plan, calendar_path):
+    validate_granola_inventories(plan['config'])
     if plan.get('kind') != 'meeting-calendar-plan':
         raise Error('not a calendar preview plan')
     config = plan['config']
@@ -861,6 +1024,13 @@ def validate_plan(plan, calendar_path):
     for artifact in plan['artifacts']:
         path = Path(artifact['path'])
         roots = [Path(source['path']) for source in config['sources'] if source['name'] == artifact['source'] and source['type'] == artifact['type']]
+        if artifact['type'] == 'granola' and artifact.get('format') == 'rejected_granola':
+            # Isolate rejected entries without resolving/reading a symlink or FIFO.
+            current = path.lstat()
+            snapshot = dict(device=current.st_dev, inode=current.st_ino, size=current.st_size, mtime_ns=current.st_mtime_ns)
+            if path.parent not in roots or snapshot != artifact['snapshot'] or stat.S_ISREG(current.st_mode) or artifact['transcripts']:
+                raise Error('rejected Granola entry changed; regenerate preview')
+            continue
         if path.resolve() != path or path.parent not in roots:
             raise Error('source must remain a top-level artifact of the configured root')
         if artifact_snapshot(path, artifact['status'] == 'verified') != artifact['snapshot']:
@@ -881,6 +1051,10 @@ def prepare_snapshot(transcript, title=None):
         if title is not None and (transcript.get('title') != title or not transcript.get('content_sha256')):
             raise Error('native derived context changed; regenerate preview')
         output, _ = native.prepare(source.parent, transcript.get('title', 'Amanu snapshot'), transcript['inputs'])
+    elif transcript.get('format') == 'canonical_granola':
+        _, _, _, raw, output = granola_prepare(source)
+        if digest(raw) != transcript['sha256']:
+            raise Error('transcript changed; regenerate preview')
     else:
         if source.is_symlink() or file_digest(source) != transcript['sha256']:
             raise Error('transcript changed; regenerate preview')
@@ -1114,7 +1288,10 @@ def apply(args):
     checkpoint('after-plan-read')
     plan = parse_markdown(plan_bytes, str(args.plan))
     validate_plan_shape(plan)
+    if plan.get('source_acquisition_incomplete'):
+        raise Error('source acquisition incomplete (' + ', '.join(plan['source_acquisition_incomplete']) + '); apply refused without imports, state or boundary advancement; finish acquisition and regenerate preview')
     config = plan['config']
+    validate_granola_inventories(config)
     project = Path(config['project'])
     settings = project / '.meeting-transcript'
     if settings.is_symlink() or settings.resolve() != settings:
@@ -1180,7 +1357,11 @@ def apply(args):
                 failpoint('before-import')
                 if file_digest(source) != selected['sha256']:
                     raise Error('transcript changed immediately before import; regenerate preview')
-                exclusive_import(source, out, output, settings, prepare=lambda: prepare_snapshot(selected, meeting['event']['title']))
+                def prepare_reviewed_snapshot():
+                    prepared = prepare_snapshot(selected, meeting['event']['title'])
+                    validate_granola_inventories(config)
+                    return prepared
+                exclusive_import(source, out, output, settings, prepare=prepare_reviewed_snapshot)
                 failpoint('after-import')
                 record.update(status='imported', reason='', imported_path=str(destination))
             elif meeting['status'] == 'calendar-update':
@@ -1226,6 +1407,8 @@ def apply(args):
             state['meetings'] = list(records.values())
             state['initial_start'] = plan['initial_start']
             save_state(project, state, journal_path, journal)
+        checkpoint('before-final-watermark')
+        validate_granola_inventories(config)
         state['period_end'] = plan['period_end']
         state['generation'] += 1
         state['initial_start'] = plan['initial_start']

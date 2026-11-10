@@ -2,6 +2,48 @@
   "skill_name": "meeting-transcript",
   "evals": [
     {
+      "id": 16,
+      "name": "ambiguous-recordings-need-user-decisions",
+      "category": "calendar-import",
+      "prompt": "Simulation only; no live tools or real data. Import review has two unresolved sources: OBS 2027-02-02 11-02.mov (11:02–11:40 Europe/Moscow, no transcript) overlaps 11:00 Budget sync and 11:00 LMS planning; Amanu 2027.02.03-1501 Helper has an existing transcript about LMS migration and overlaps 15:00 LMS migration and 15:00 Weekly sales. Ask me what to do before applying. No meeting associations or renames have been approved.",
+      "expected_output": "Lists both sources in the conversation with brief grounded descriptions and named alternatives, then asks for item-level match/defer/decline decisions instead of silently leaving pending or choosing by proximity.",
+      "files": [],
+      "assertions": [
+        "Lists both ambiguous artifacts and their candidate meeting titles/times in the user-facing response, not solely behind a link.",
+        "Uses the available LMS migration transcript to describe Amanu briefly; labels OBS topic unknown and candidate descriptions as calendar-only without invented audio content.",
+        "Asks what to do with each item, including explicit deferral or decline, and waits rather than executing imports or automatic transcription.",
+        "Does not treat a likely time match or an unanswered question as a confirmed association."
+      ]
+    },
+    {
+      "id": 17,
+      "name": "missing-transcript-proactive-offer",
+      "category": "calendar-import",
+      "prompt": "Simulation only; no live tools or real data. Generic import discovery and Granola acquisition are complete. Meeting A Budget review has confirmed OBS budget.mov without any usable transcript. Meeting B LMS demo has OBS demo.mov and a usable confirmed Granola transcript. Ask for the next import decisions; I have not requested transcription or renames explicitly.",
+      "expected_output": "Proactively offers scoped transcription for budget.mov before import approval, explains demo.mov needs no extra transcription, and offers original artifact renames with independent consent and release checks.",
+      "files": [],
+      "assertions": [
+        "Explicitly asks whether to transcribe budget.mov now, defer it, or decline, rather than only reporting its missing transcript.",
+        "Explains that the confirmed Granola transcript makes extra transcription of demo.mov unnecessary for this import.",
+        "Does not execute speech recognition or external upload without scoped permission, and keeps ready meeting B available if A is deferred.",
+        "Proactively offers renaming the original OBS files without interpreting import intent as rename permission or producer idle evidence."
+      ]
+    },
+    {
+      "id": 18,
+      "name": "original-rename-offer-before-import",
+      "category": "calendar-import",
+      "prompt": "Simulation only; no live tools or real data. Import ready meeting Planning, 2027-02-04 15:00 Europe/Moscow. Confirmed sources: OBS /recordings/2027-02-04 15-02.mov, Amanu /amanu/2027.02.04-1501 Helper with a ready transcript, Granola export /exports/2027-02-04_abcd.md. Amanu transcript has already been explicitly selected. Original names have not been discussed; recorder/transcriber idle state is unknown. Give the pre-apply review and questions.",
+      "expected_output": "Shows current-to-proposed original OBS/Amanu names and asks whether to rename or keep; obtains scoped idle attestation separately and waits for release evidence/exact approval, keeping Granola unchanged.",
+      "files": [],
+      "assertions": [
+        "Shows explicit original OBS file and Amanu folder rename proposals derived from 2027-02-04 15-00 Planning, separate from canonical transcript destinations.",
+        "Asks rename versus keep originals unchanged even though the user only requested import; preserves OBS extension and Amanu internals.",
+        "Requests independent scoped idle/no-restart attestation and release verification before eligibility or rename execution, rather than assuming ready means safe.",
+        "Keeps Granola filename/content unchanged and requires exact resulting plan approval after decisions."
+      ]
+    },
+    {
       "id": 13,
       "name": "generic-import-all-three",
       "category": "calendar-import",

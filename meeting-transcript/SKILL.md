@@ -18,7 +18,7 @@ metadata:
 | Explicit local transcript/export selection | Use **Direct import** below; ask before fetching additional data. |
 | `$meeting summarize`, verify/improve meeting notes, or reconcile a prior summary | Read [summarize.md](references/summarize.md) before preparation, transcript analysis or summary output. |
 
-Calendar retries, recording renames and changes to imported events also require `calendar-sync.md`. Resolve the actual calendar, timezone, destination and initial date; use evidence and explicit choices rather than guessing a nearest event. Granola's patch/restart confirmations and version-drift safeguards still apply.
+Calendar retries, recording renames and changes to imported events also require `calendar-sync.md`. Before approving any recording import, read [import-review.md](references/import-review.md): ask about listed ambiguous sources with brief evidence-grounded meeting descriptions, offer missing-transcript transcription, and offer original OBS/Amanu renames. Explicit canonical-file imports without recording artifacts use the direct branch below. Resolve the actual calendar, timezone, destination and initial date; use evidence and explicit choices rather than guessing a nearest event. Granola's patch/restart confirmations and version-drift safeguards still apply.
 
 ## Artifact contract
 
